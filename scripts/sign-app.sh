@@ -56,6 +56,9 @@ EOF
     chmod 600 "$p12"
   fi
 
+  if [[ ! -f "$cert" ]]; then
+    openssl pkcs12 -in "$p12" -clcerts -nokeys -out "$cert" -passin "pass:${password}"
+  fi
   security import "$p12" \
     -k "$keychain" \
     -P "$password" \
