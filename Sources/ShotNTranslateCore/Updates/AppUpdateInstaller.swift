@@ -118,9 +118,6 @@ public enum ReleaseDownloader {
         var request = URLRequest(url: url)
         request.setValue("ShotNTranslate", forHTTPHeaderField: "User-Agent")
         request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
-        if let token = GitHubCLISession.token(), !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
 
         let fileURL: URL
         let response: URLResponse

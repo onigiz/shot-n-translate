@@ -170,7 +170,7 @@ struct UpdateHistoryView: View {
 
     private func isFeedFailure(_ failure: UpdateFailure) -> Bool {
         switch failure {
-        case .repositoryNotAccessible, .gitHubSessionMissing, .invalidResponse:
+        case .repositoryNotAccessible, .invalidResponse:
             true
         default:
             false

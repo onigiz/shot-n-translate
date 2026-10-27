@@ -26,7 +26,7 @@ The menu stores the target language in `TranslationSettings.target`. Recognized 
 
 The menu can check for updates, show the history, install a newer version, and restore an older one. Patch notes are the English text of each GitHub Release and are shown as published.
 
-The repository stays private. On this Mac the app uses the signed-in GitHub CLI account, so that account can read the releases. The token is not copied into the app. See [docs/RELEASING.md](docs/RELEASING.md).
+Releases are public. Anyone can check for updates, read the patch notes, and install a version without signing in. See [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Build
 

@@ -2,7 +2,6 @@ import Foundation
 
 public enum ReleaseFeedError: Error, Equatable {
     case repositoryNotAccessible
-    case gitHubSessionMissing
     case invalidResponse
 }
 
@@ -14,31 +13,24 @@ public struct GitHubReleasesFeed: ReleaseFetching, Sendable {
     public var owner: String
     public var repository: String
     public var session: URLSession
-    public var token: @Sendable () -> String?
 
     public init(
         owner: String = AppReleaseIdentity.githubOwner,
         repository: String = AppReleaseIdentity.githubRepository,
-        session: URLSession = .shared,
-        token: (@Sendable () -> String?)? = nil
+        session: URLSession = .shared
     ) {
         self.owner = owner
         self.repository = repository
         self.session = session
-        self.token = token ?? { GitHubCLISession.token() }
     }
 
     public func fetch() async throws -> [AppRelease] {
         guard let url = URL(string: "https://api.github.com/repos/\(owner)/\(repository)/releases?per_page=100") else {
             throw ReleaseFeedError.invalidResponse
         }
-        let credential = token()
         var request = URLRequest(url: url)
         request.setValue("ShotNTranslate", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        if let credential, !credential.isEmpty {
-            request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        }
 
         let data: Data
         let response: URLResponse
@@ -54,9 +46,6 @@ public struct GitHubReleasesFeed: ReleaseFetching, Sendable {
         case 200:
             return try Self.parse(data)
         case 401, 403, 404:
-            if credential == nil || credential?.isEmpty == true {
-                throw ReleaseFeedError.gitHubSessionMissing
-            }
             throw ReleaseFeedError.repositoryNotAccessible
         default:
             throw ReleaseFeedError.invalidResponse

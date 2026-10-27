@@ -39,7 +39,6 @@ public struct AppRelease: Identifiable, Equatable, Hashable, Sendable {
 
 public enum UpdateFailure: Error, Equatable, Sendable {
     case repositoryNotAccessible
-    case gitHubSessionMissing
     case invalidResponse
     case updatesRequireAppBundle
     case noDownloadablePackage

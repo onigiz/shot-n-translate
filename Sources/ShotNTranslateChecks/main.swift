@@ -9,7 +9,7 @@ struct ShotNTranslateChecks {
             try await checkPreferences()
             try checkReleases()
             try await checkInstaller()
-            try await checkPrivateRepositoryAccess()
+            try await checkPublicReleaseAccess()
             print("All checks passed")
         } catch {
             fputs("\(error)\n", stderr)
@@ -204,7 +204,7 @@ private func checkInstaller() async throws {
     try expect(history.newestUpdate?.notes == "Newer.", "Newest notes")
 }
 
-private func checkPrivateRepositoryAccess() async throws {
+private func checkPublicReleaseAccess() async throws {
     let releases = try await GitHubReleasesFeed().fetch()
     guard let url = releases.compactMap(\.downloadURL).first else { return }
     let file = try await ReleaseDownloader.download(url)

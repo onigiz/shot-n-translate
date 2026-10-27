@@ -26,7 +26,6 @@ public enum L10nKey: CaseIterable, Sendable {
     case installing
     case couldNotCheck
     case repositoryNotAccessible
-    case gitHubSessionMissing
     case invalidResponse
     case updatesRequireAppBundle
     case noDownloadablePackage
@@ -91,8 +90,6 @@ public enum L10n {
         switch failure {
         case .repositoryNotAccessible:
             string(.repositoryNotAccessible, language: language)
-        case .gitHubSessionMissing:
-            string(.gitHubSessionMissing, language: language)
         case .invalidResponse:
             string(.invalidResponse, language: language)
         case .updatesRequireAppBundle:
@@ -136,8 +133,7 @@ public enum L10n {
         case .downloading: "İndiriliyor…"
         case .installing: "Kuruluyor… Güncellemeden sonra uygulama yeniden açılır."
         case .couldNotCheck: "Güncellemeler denetlenemedi."
-        case .repositoryNotAccessible: "Bu GitHub hesabının depoya erişimi yok."
-        case .gitHubSessionMissing: "Bu Mac’te GitHub oturumu yok. Özel depo için oturum gerekir."
+        case .repositoryNotAccessible: "Sürüm listesine erişilemedi."
         case .invalidResponse: "Sürüm listesi okunamadı."
         case .updatesRequireAppBundle: "Güncelleme yalnızca kurulu uygulama paketinden yapılır."
         case .noDownloadablePackage: "Bu sürümde indirilebilir paket yok."
@@ -179,8 +175,7 @@ public enum L10n {
         case .downloading: "Downloading…"
         case .installing: "Installing… The app reopens after the update."
         case .couldNotCheck: "Could not check for updates."
-        case .repositoryNotAccessible: "This GitHub account cannot access the repository."
-        case .gitHubSessionMissing: "There is no GitHub session on this Mac. A private repository needs one."
+        case .repositoryNotAccessible: "Could not reach the release list."
         case .invalidResponse: "The release list could not be read."
         case .updatesRequireAppBundle: "Updates install only from the application bundle."
         case .noDownloadablePackage: "This version has no downloadable package."

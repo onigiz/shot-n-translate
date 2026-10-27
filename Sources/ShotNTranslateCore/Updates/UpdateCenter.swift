@@ -54,8 +54,6 @@ public final class UpdateCenter {
             switch error {
             case .repositoryNotAccessible:
                 status = .failed(.repositoryNotAccessible)
-            case .gitHubSessionMissing:
-                status = .failed(.gitHubSessionMissing)
             case .invalidResponse:
                 status = .failed(.invalidResponse)
             }
