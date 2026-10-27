@@ -6,7 +6,7 @@ The source language is detected automatically. The translation target is Turkish
 
 ## Status
 
-The menu bar app, interface languages, translation target, and update history are in place. Screenshot capture, text recognition, and PDF export are not built yet.
+The menu bar app, interface languages, translation target, update history, and region translation are in place. A shortcut menu assigns the keyboard shortcuts. PDF export is not built yet.
 
 ## Platform
 

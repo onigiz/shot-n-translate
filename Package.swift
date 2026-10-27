@@ -13,7 +13,10 @@ let package = Package(
         .target(name: "ShotNTranslateCore"),
         .executableTarget(
             name: "ShotNTranslate",
-            dependencies: ["ShotNTranslateCore"]
+            dependencies: ["ShotNTranslateCore"],
+            linkerSettings: [
+                .linkedFramework("Carbon")
+            ]
         ),
         .executableTarget(
             name: "ShotNTranslateChecks",

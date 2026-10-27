@@ -38,6 +38,22 @@ public enum L10nKey: CaseIterable, Sendable {
     case continueAction
     case cancel
     case openReleasePage
+    case shortcutsMenu
+    case translateSelection
+    case dragToSelect
+    case readingSelection
+    case translating
+    case noTextFound
+    case detectedLanguage
+    case originalText
+    case translationResult
+    case translationResultTitle
+    case alreadyInTargetLanguage
+    case languageNotDetected
+    case translationUnavailable
+    case screenRecordingDenied
+    case captureFailed
+    case recognitionFailed
 }
 
 public enum L10n {
@@ -146,6 +162,22 @@ public enum L10n {
         case .continueAction: "Devam et"
         case .cancel: "Vazgeç"
         case .openReleasePage: "Sürüm sayfasını aç"
+        case .shortcutsMenu: "Kısayollar"
+        case .translateSelection: "Bölgeyi çevir"
+        case .dragToSelect: "Yazıyı seçmek için sürükleyin. Vazgeçmek için Esc."
+        case .readingSelection: "Yazı okunuyor…"
+        case .translating: "Çevriliyor…"
+        case .noTextFound: "Bu bölgede yazı bulunamadı."
+        case .detectedLanguage: "Tespit edilen dil"
+        case .originalText: "Orijinal"
+        case .translationResult: "Çeviri"
+        case .translationResultTitle: "Çeviri sonucu"
+        case .alreadyInTargetLanguage: "Metin zaten hedef dilde."
+        case .languageNotDetected: "Yazının dili tespit edilemedi."
+        case .translationUnavailable: "Bu dil çifti için çeviri kullanılamıyor. Sistem Ayarları'ndan çeviri dilini indirin."
+        case .screenRecordingDenied: "Ekran kaydına izin verilmedi. Sistem Ayarları'nda Ekran Kaydı'nı açın."
+        case .captureFailed: "Ekran görüntüsü alınamadı."
+        case .recognitionFailed: "Yazı okunamadı."
         }
     }
 
@@ -188,6 +220,22 @@ public enum L10n {
         case .continueAction: "Continue"
         case .cancel: "Cancel"
         case .openReleasePage: "Open release page"
+        case .shortcutsMenu: "Shortcuts"
+        case .translateSelection: "Translate Selection"
+        case .dragToSelect: "Drag to select the text. Press Esc to cancel."
+        case .readingSelection: "Reading text…"
+        case .translating: "Translating…"
+        case .noTextFound: "No text was found in this region."
+        case .detectedLanguage: "Detected language"
+        case .originalText: "Original"
+        case .translationResult: "Translation"
+        case .translationResultTitle: "Translation Result"
+        case .alreadyInTargetLanguage: "The text is already in the target language."
+        case .languageNotDetected: "The language of the text could not be detected."
+        case .translationUnavailable: "Translation is not available for this language pair. Download the language in System Settings."
+        case .screenRecordingDenied: "Screen Recording permission was denied. Turn it on in System Settings."
+        case .captureFailed: "The screenshot could not be captured."
+        case .recognitionFailed: "The text could not be read."
         }
     }
 }

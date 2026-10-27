@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import ShotNTranslateCore
 
@@ -6,6 +7,7 @@ struct ShotNTranslateChecks {
     static func main() async {
         do {
             try checkLocalization()
+            try checkCaptureFoundation()
             try await checkPreferences()
             try checkReleases()
             try await checkInstaller()
@@ -53,6 +55,81 @@ private func checkLocalization() throws {
             != L10n.confirmUpdateMessage(version: "0.2.0", language: .english),
         "Update confirmation should be localized"
     )
+}
+
+private func checkCaptureFoundation() throws {
+    let primaryMaxY: CGFloat = 900
+    let top = CaptureCoordinateSpace.displayRect(
+        fromAppKitRect: CGRect(x: 10, y: 800, width: 100, height: 50),
+        primaryScreenMaxY: primaryMaxY
+    )
+    try expect(top == CGRect(x: 10, y: 50, width: 100, height: 50), "Top AppKit rect maps near the display top")
+    let bottom = CaptureCoordinateSpace.displayRect(
+        fromAppKitRect: CGRect(x: 10, y: 0, width: 100, height: 50),
+        primaryScreenMaxY: primaryMaxY
+    )
+    try expect(bottom == CGRect(x: 10, y: 850, width: 100, height: 50), "Bottom AppKit rect maps near the display bottom")
+    let above = CaptureCoordinateSpace.displayRect(
+        fromAppKitRect: CGRect(x: 0, y: 900, width: 800, height: 100),
+        primaryScreenMaxY: primaryMaxY
+    )
+    try expect(above.origin.y == -100, "A display above the primary screen has a negative display Y")
+
+    let english = LanguageDetector.detectCode(in: "Hello, the weather in the city is very nice and the sea was calm today.")
+    let turkish = LanguageDetector.detectCode(in: "Merhaba, bugün İstanbul'da hava çok güzel ve deniz oldukça sakindi.")
+    try expect(english == "en", "English detection")
+    try expect(turkish == "tr", "Turkish detection")
+    try expect(LanguageDetector.detectCode(in: "   ") == nil, "Blank text has no language")
+    try expect(LanguageDetector.matches("en-US", target: .english), "Regional English matches the English target")
+    try expect(!LanguageDetector.matches("tr", target: .english), "Turkish does not match the English target")
+
+    try expect(ShortcutCatalog.items.first?.function == .translateSelection, "First shortcut translates a selection")
+    try expect(
+        Set(ShortcutCatalog.items.map(\.function)).count == ShortcutCatalog.items.count,
+        "Shortcut functions are unique"
+    )
+    try expect(Set(ShortcutCatalog.items.map(\.key)).count == ShortcutCatalog.items.count, "Shortcut keys are unique")
+    try expect(
+        ShortcutCatalog.items.allSatisfy { $0.command && $0.shift && $0.key.count == 1 },
+        "Shortcuts use Command-Shift and one key"
+    )
+
+    let image = try renderedTextImage("HELLO")
+    let recognized = try TextRecognizer.recognize(in: image).uppercased()
+    try expect(recognized.contains("HELLO"), "Vision reads rendered text, got \(recognized)")
+}
+
+private func renderedTextImage(_ text: String) throws -> CGImage {
+    let width = 1200
+    let height = 240
+    guard let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: width,
+        pixelsHigh: height,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ) else {
+        throw CheckError(description: "Could not create a text image")
+    }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSColor.white.setFill()
+    NSRect(x: 0, y: 0, width: width, height: height).fill()
+    let attributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 96, weight: .bold),
+        .foregroundColor: NSColor.black
+    ]
+    (text as NSString).draw(at: NSPoint(x: 40, y: 60), withAttributes: attributes)
+    NSGraphicsContext.restoreGraphicsState()
+    guard let image = rep.cgImage else {
+        throw CheckError(description: "Could not read the text image")
+    }
+    return image
 }
 
 @MainActor

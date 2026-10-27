@@ -207,7 +207,7 @@ private struct InstallRequest: Identifiable {
     var id: String { "\(kind)-\(release.id)" }
 }
 
-private struct WindowTitleSetter: NSViewRepresentable {
+struct WindowTitleSetter: NSViewRepresentable {
     var title: String
 
     func makeNSView(context: Context) -> NSView { NSView() }

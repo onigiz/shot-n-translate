@@ -68,6 +68,8 @@ cat > "$app/Contents/Info.plist" <<EOF
   <string>26.0</string>
   <key>LSUIElement</key>
   <true/>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>Seçilen ekran bölgesindeki yazıyı okuyup çevirmek için ekran görüntüsü alınır.</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSPrincipalClass</key>

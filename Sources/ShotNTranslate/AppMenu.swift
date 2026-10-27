@@ -6,7 +6,8 @@ struct AppMenu: View {
     @Environment(LanguageStore.self) private var languageStore
     @Environment(TranslationSettings.self) private var translationSettings
     @Environment(UpdateCenter.self) private var updateCenter
-    @Environment(\.openWindow) private var openWindow
+    @Environment(ScreenshotTranslator.self) private var translator
+    @Environment(ShortcutRouter.self) private var router
 
     var body: some View {
         let language = languageStore.language
@@ -29,6 +30,23 @@ struct AppMenu: View {
         } else if case .failed = updateCenter.status {
             Button(L10n.string(.couldNotCheck, language: language)) {}
                 .disabled(true)
+        }
+
+        Divider()
+
+        Button(L10n.string(.translateSelection, language: language)) {
+            router.run(.translateSelection)
+        }
+        .disabled(translator.isBusy)
+
+        Menu(L10n.string(.shortcutsMenu, language: language)) {
+            ForEach(ShortcutCatalog.items) { spec in
+                Button(shortcutTitle(spec.function, language: language)) {
+                    router.run(spec.function)
+                }
+                .keyboardShortcut(KeyEquivalent(Character(spec.key)), modifiers: shortcutModifiers(spec))
+                .disabled(isShortcutDisabled(spec.function))
+            }
         }
 
         Divider()
@@ -65,6 +83,35 @@ struct AppMenu: View {
         .keyboardShortcut("q")
     }
 
+    private func shortcutTitle(_ function: ShortcutFunction, language: AppLanguage) -> String {
+        switch function {
+        case .translateSelection:
+            L10n.string(.translateSelection, language: language)
+        case .checkForUpdates:
+            L10n.string(.checkForUpdates, language: language)
+        case .showUpdateHistory:
+            L10n.string(.updateHistory, language: language)
+        }
+    }
+
+    private func shortcutModifiers(_ spec: ShortcutSpec) -> EventModifiers {
+        var modifiers: EventModifiers = []
+        if spec.command { modifiers.insert(.command) }
+        if spec.shift { modifiers.insert(.shift) }
+        return modifiers
+    }
+
+    private func isShortcutDisabled(_ function: ShortcutFunction) -> Bool {
+        switch function {
+        case .translateSelection:
+            translator.isBusy
+        case .checkForUpdates:
+            updateCenter.isBusy
+        case .showUpdateHistory:
+            false
+        }
+    }
+
     private func targetToggle(_ target: TranslationTarget, title: String, language: AppLanguage) -> some View {
         Toggle(isOn: Binding(
             get: { translationSettings.target == target },
@@ -90,9 +137,6 @@ struct AppMenu: View {
     }
 
     private func showUpdateHistory(checking: Bool = true) {
-        NSApplication.shared.activate()
-        openWindow(id: AppWindow.updateHistory)
-        guard checking else { return }
-        Task { await updateCenter.checkForUpdates() }
+        router.showUpdateHistory(checking: checking)
     }
 }

@@ -1,0 +1,17 @@
+---
+description: Read and update the durable project memory every session
+alwaysApply: true
+---
+
+# Project memory
+
+`memory-important-infos.md` at the repository root is the durable memory for this project.
+
+- Read it before changing the product, releases, languages, or repository setup.
+- Update it in the same session when the user says not to forget something, or when a lasting decision changes.
+- Record the decision and why it matters. Remove facts that are no longer true.
+- Do not store secrets, tokens, or passwords.
+
+## Example
+
+The user says the app must stay macOS-only. Add that under Do not forget, and correct any section that says otherwise.
