@@ -61,10 +61,16 @@ struct TranslationResultView: View {
             guard let text else { return }
             do {
                 try await session.prepareTranslation()
-                let translated = try await session.translate(text).targetText
-                translator.finishTranslation(of: text, translated: translated)
+                let response = try await session.translate(text)
+                let sourceCode = response.sourceLanguage.languageCode?.identifier
+                    ?? response.sourceLanguage.maximalIdentifier
+                translator.finishTranslation(
+                    of: text,
+                    translated: response.targetText,
+                    detectedSourceCode: sourceCode
+                )
             } catch {
-                translator.finishTranslation(of: text, translated: nil)
+                translator.finishTranslation(of: text, translated: nil, detectedSourceCode: nil)
             }
         }
     }

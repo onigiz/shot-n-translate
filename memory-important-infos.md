@@ -10,6 +10,7 @@ Shot n Translate is a macOS-only app. It processes a screenshot, detects text in
 - Stack: Swift and SwiftUI, Apple frameworks only. No third-party packages.
 - Capture: ScreenCaptureKit. Text recognition: Vision. Source-language detection: NaturalLanguage. Translation: Translation. PDF: PDFKit.
 - Region translation is built. The user drags a rectangle, the app reads the text, detects its language, and translates it into the selected target. The result window shows the detected language, the original text, and the translation.
+- Source-language detection combines NaturalLanguage hypotheses, Vision recognition languages, and script heuristics (for example Turkish diacritics). Short plain Latin OCR text falls back to English. If the code is still unknown, translation still runs with an automatic source language.
 - Translation uses SwiftUI `translationTask`, so macOS can ask the user to download a missing language. If the text is already in the target language, it is not sent to the translator.
 - PDF export is not built yet.
 - Screen Recording permission is required. The packaged app declares `NSScreenCaptureUsageDescription`.

@@ -80,6 +80,18 @@ private func checkCaptureFoundation() throws {
     try expect(english == "en", "English detection")
     try expect(turkish == "tr", "Turkish detection")
     try expect(LanguageDetector.detectCode(in: "   ") == nil, "Blank text has no language")
+    try expect(
+        LanguageDetector.detectCode(in: "Bu metin Türkçe karakterler içerir: şğüöçı") == "tr",
+        "Turkish diacritics identify Turkish"
+    )
+    try expect(
+        LanguageDetector.detectCode(in: "HELLO WORLD FROM SCREEN") == "en",
+        "Short Latin OCR text falls back to English"
+    )
+    try expect(
+        LanguageDetector.detectCode(in: "??? ###", visionHints: ["de"]) == "de",
+        "Vision language hints are used when text has no script signal"
+    )
     try expect(LanguageDetector.matches("en-US", target: .english), "Regional English matches the English target")
     try expect(!LanguageDetector.matches("tr", target: .english), "Turkish does not match the English target")
 
@@ -95,8 +107,8 @@ private func checkCaptureFoundation() throws {
     )
 
     let image = try renderedTextImage("HELLO")
-    let recognized = try TextRecognizer.recognize(in: image).uppercased()
-    try expect(recognized.contains("HELLO"), "Vision reads rendered text, got \(recognized)")
+    let recognized = try TextRecognizer.recognize(in: image)
+    try expect(recognized.text.uppercased().contains("HELLO"), "Vision reads rendered text, got \(recognized.text)")
 }
 
 private func renderedTextImage(_ text: String) throws -> CGImage {

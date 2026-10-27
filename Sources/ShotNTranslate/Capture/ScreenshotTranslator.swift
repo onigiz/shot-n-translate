@@ -52,29 +52,22 @@ final class ScreenshotTranslator {
             return
         }
 
-        let text: String
+        let recognized: RecognizedText
         do {
-            text = try TextRecognizer.recognize(in: image)
+            recognized = try TextRecognizer.recognize(in: image)
         } catch {
             presentation = .failure(.recognitionFailed)
             return
         }
+        let text = recognized.text
         guard !text.isEmpty else {
             presentation = .failure(.noTextFound)
             return
         }
 
-        guard let code = LanguageDetector.detectCode(in: text) else {
-            presentation = .result(CaptureTranslation(
-                original: text,
-                sourceLanguageCode: nil,
-                translatedText: nil,
-                note: .languageNotDetected
-            ))
-            return
-        }
+        let code = LanguageDetector.detectCode(in: text, visionHints: recognized.visionLanguageCodes)
 
-        if LanguageDetector.matches(code, target: settings.target) {
+        if let code, LanguageDetector.matches(code, target: settings.target) {
             pendingText = nil
             isTranslating = false
             translationConfiguration = nil
@@ -92,10 +85,12 @@ final class ScreenshotTranslator {
         presentation = .result(CaptureTranslation(
             original: text,
             sourceLanguageCode: code,
-            translatedText: nil
+            translatedText: nil,
+            note: code == nil ? .languageNotDetected : nil
         ))
+        // Nil source lets Translation detect the language when OCR + NL disagree or stay undecided.
         var configuration = TranslationSession.Configuration(
-            source: Locale.Language(identifier: code),
+            source: code.map { Locale.Language(identifier: $0) },
             target: Locale.Language(identifier: settings.target.rawValue)
         )
         configuration.invalidate()
@@ -106,15 +101,24 @@ final class ScreenshotTranslator {
         pendingText
     }
 
-    func finishTranslation(of text: String, translated: String?) {
+    func finishTranslation(of text: String, translated: String?, detectedSourceCode: String?) {
         guard pendingText == text else { return }
         replaceResult { result in
-            if let translated, !translated.isEmpty {
-                result.translatedText = translated
-                result.note = nil
-            } else {
-                result.note = .translationUnavailable
+            if let detectedSourceCode, result.sourceLanguageCode == nil {
+                let base = LanguageDetector.baseCode(detectedSourceCode)
+                if !base.isEmpty, base != "und" {
+                    result.sourceLanguageCode = base
+                }
             }
+            if let translated {
+                let cleaned = translated.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !cleaned.isEmpty {
+                    result.translatedText = cleaned
+                    result.note = nil
+                    return
+                }
+            }
+            result.note = .translationUnavailable
         }
         isTranslating = false
     }
