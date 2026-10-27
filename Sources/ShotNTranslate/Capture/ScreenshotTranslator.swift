@@ -41,52 +41,35 @@ final class ScreenshotTranslator {
         capturePreview = nil
         pendingText = nil
         translationConfiguration = nil
-        presentation = .working
-        TranslationResultWindow.show(translator: self, languageStore: languageStore)
-        do {
-            try await Task.sleep(nanoseconds: 250_000_000)
-        } catch {
-            return
-        }
 
-        let primary: CGImage
+        let prepared: CGImage
         do {
-            primary = try await ScreenRegionCapture.displayImage(forAppKitRect: rect)
+            // Capture before the result window is shown, so the window cannot cover the selection.
+            let captured = try await ScreenRegionCapture.image(forAppKitRect: rect)
+            prepared = TextRecognizer.standardImage(captured)
         } catch {
             presentation = .failure(ScreenRegionCapture.permissionDenied(error) ? .screenRecordingDenied : .captureFailed)
+            TranslationResultWindow.show(translator: self, languageStore: languageStore)
             return
         }
 
-        let primaryText: RecognizedText?
+        showPreview(prepared)
+        presentation = .working
+        TranslationResultWindow.show(translator: self, languageStore: languageStore)
+
+        let recognized: RecognizedText?
         do {
-            primaryText = try readableText(in: primary)
+            recognized = try readableText(in: prepared)
         } catch {
-            showPreview(primary)
             presentation = .failure(.recognitionFailed)
             return
         }
-        if let primaryText {
-            presentRecognizedText(primaryText)
+        if let recognized {
+            presentRecognizedText(recognized)
             return
         }
-
-        var preview = primary
-        var previewContrast = TextRecognizer.contrast(primary)
-        if previewContrast < 0.04, let alternate = try? await ScreenRegionCapture.rawImage(forAppKitRect: rect) {
-            if let alternateText = (try? readableText(in: alternate)) ?? nil {
-                presentRecognizedText(alternateText)
-                return
-            }
-            let alternateContrast = TextRecognizer.contrast(alternate)
-            if alternateContrast > previewContrast {
-                preview = alternate
-                previewContrast = alternateContrast
-            }
-        }
-
-        showPreview(preview)
-        presentation = .failure(previewContrast < 0.04 ? .screenRecordingDenied : .noTextFound)
-        return
+        let blank = TextRecognizer.brightPixelFraction(prepared) < 0.004
+        presentation = .failure(blank ? .screenRecordingDenied : .noTextFound)
     }
 
     private func readableText(in image: CGImage) throws -> RecognizedText? {
@@ -96,9 +79,13 @@ final class ScreenshotTranslator {
     }
 
     private func showPreview(_ image: CGImage) {
+        let pixelWidth = CGFloat(max(image.width, 1))
+        let pixelHeight = CGFloat(max(image.height, 1))
+        let longest = max(pixelWidth, pixelHeight)
+        let fitted = min(1, 720 / longest)
         capturePreview = NSImage(
             cgImage: image,
-            size: NSSize(width: image.width, height: image.height)
+            size: NSSize(width: pixelWidth * fitted, height: pixelHeight * fitted)
         )
     }
 

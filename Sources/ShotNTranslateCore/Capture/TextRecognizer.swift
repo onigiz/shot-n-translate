@@ -42,7 +42,29 @@ public enum TextRecognizer {
 
     /// Luminance range from 0 to 1. A black permission capture is near 0.
     public static func contrast(_ image: CGImage) -> Double {
-        let side = 48
+        guard let pixels = luminanceSamples(image) else { return 1 }
+        var minimum = 255
+        var maximum = 0
+        for value in pixels {
+            let sample = Int(value)
+            minimum = min(minimum, sample)
+            maximum = max(maximum, sample)
+        }
+        return Double(maximum - minimum) / 255
+    }
+
+    /// Share of samples that are light enough to be body text on a dark page.
+    /// A black capture is 0. A dark page with light text is well above that.
+    public static func brightPixelFraction(_ image: CGImage) -> Double {
+        guard let pixels = luminanceSamples(image), !pixels.isEmpty else { return 0 }
+        let bright = pixels.reduce(0) { count, value in
+            count + (value >= 160 ? 1 : 0)
+        }
+        return Double(bright) / Double(pixels.count)
+    }
+
+    private static func luminanceSamples(_ image: CGImage) -> [UInt8]? {
+        let side = 64
         guard let colorSpace = CGColorSpace(name: CGColorSpace.genericGrayGamma2_2),
               let context = CGContext(
                 data: nil,
@@ -54,19 +76,12 @@ public enum TextRecognizer {
                 bitmapInfo: CGImageAlphaInfo.none.rawValue
               ),
               let data = context.data else {
-            return 1
+            return nil
         }
-        context.interpolationQuality = .low
+        context.interpolationQuality = .medium
         context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
-        let pixels = data.bindMemory(to: UInt8.self, capacity: side * side)
-        var minimum = 255
-        var maximum = 0
-        for index in 0..<(side * side) {
-            let value = Int(pixels[index])
-            minimum = min(minimum, value)
-            maximum = max(maximum, value)
-        }
-        return Double(maximum - minimum) / 255
+        let bytes = data.bindMemory(to: UInt8.self, capacity: side * side)
+        return Array(UnsafeBufferPointer(start: bytes, count: side * side))
     }
 
     /// ScreenCaptureKit can return wide-gamut or floating-point images. Vision then

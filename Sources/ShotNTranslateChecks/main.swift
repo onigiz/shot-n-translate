@@ -74,6 +74,15 @@ private func checkCaptureFoundation() throws {
         primaryScreenMaxY: primaryMaxY
     )
     try expect(above.origin.y == -100, "A display above the primary screen has a negative display Y")
+    let secondary = CGRect(x: 1920, y: 124, width: 1470, height: 956)
+    let onSecondary = CaptureCoordinateSpace.localDisplayRect(
+        appKitRect: CGRect(x: 2000, y: 500, width: 400, height: 200),
+        screenFrame: secondary
+    )
+    try expect(
+        onSecondary == CGRect(x: 80, y: 380, width: 400, height: 200),
+        "A secondary-display selection is local to that display's top-left"
+    )
 
     let english = LanguageDetector.detectCode(in: "Hello, the weather in the city is very nice and the sea was calm today.")
     let turkish = LanguageDetector.detectCode(in: "Merhaba, bugün İstanbul'da hava çok güzel ve deniz oldukça sakindi.")
@@ -120,8 +129,10 @@ private func checkCaptureFoundation() throws {
     let pageText = try TextRecognizer.recognize(in: page).text.lowercased()
     try expect(pageText.contains("install"), "Small text in a tall dark capture is read, got \(pageText)")
     try expect(TextRecognizer.contrast(page) > 0.2, "A text page has visible contrast")
+    try expect(TextRecognizer.brightPixelFraction(page) > 0.01, "A text page has light pixels")
     let blank = try renderedTextImage(" ", width: 200, height: 200, fontSize: 12, dark: true)
     try expect(TextRecognizer.contrast(blank) < 0.04, "A black capture has no contrast")
+    try expect(TextRecognizer.brightPixelFraction(blank) < 0.004, "A black capture has no light pixels")
 }
 
 private func renderedTextImage(

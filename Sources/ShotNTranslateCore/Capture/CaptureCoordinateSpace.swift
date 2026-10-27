@@ -13,4 +13,20 @@ public enum CaptureCoordinateSpace {
             height: rect.height
         )
     }
+
+    /// The part of `appKitRect` that lies on `screenFrame`, in that display's local
+    /// points. The origin is the top-left of the display and Y grows downward.
+    /// ScreenCaptureKit's `sourceRect` uses this space, including on a secondary display.
+    public static func localDisplayRect(appKitRect: CGRect, screenFrame: CGRect) -> CGRect {
+        let clipped = appKitRect.intersection(screenFrame)
+        guard !clipped.isNull, !clipped.isEmpty, clipped.width >= 1, clipped.height >= 1 else {
+            return .zero
+        }
+        return CGRect(
+            x: clipped.origin.x - screenFrame.origin.x,
+            y: screenFrame.maxY - clipped.maxY,
+            width: clipped.width,
+            height: clipped.height
+        )
+    }
 }
