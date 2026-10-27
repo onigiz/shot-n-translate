@@ -78,4 +78,8 @@ cat > "$app/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
+# Screen Recording permission is stored for a signed app. An unsigned bundle is
+# refused even when the switch in System Settings is on.
+codesign --force --sign - "$app"
+
 echo "$app"

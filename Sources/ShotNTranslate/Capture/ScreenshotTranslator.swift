@@ -68,8 +68,7 @@ final class ScreenshotTranslator {
             presentRecognizedText(recognized)
             return
         }
-        let blank = TextRecognizer.brightPixelFraction(prepared) < 0.004
-        presentation = .failure(blank ? .screenRecordingDenied : .noTextFound)
+        presentation = .failure(.noTextFound)
     }
 
     private func readableText(in image: CGImage) throws -> RecognizedText? {
