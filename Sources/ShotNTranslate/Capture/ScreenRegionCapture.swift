@@ -64,7 +64,8 @@ enum ScreenRegionCapture {
     }
 
     private static func capture(filter: SCContentFilter, localRect: CGRect, scale: CGFloat) async throws -> CGImage {
-        let pointScale = filter.pointPixelScale > 0 ? filter.pointPixelScale : max(scale, 1)
+        let measuredScale = CGFloat(filter.pointPixelScale)
+        let pointScale = measuredScale > 0 ? measuredScale : max(scale, 1)
         let pixelsWide = max(Int((localRect.width * pointScale).rounded()), 1)
         let pixelsHigh = max(Int((localRect.height * pointScale).rounded()), 1)
         let configuration = SCStreamConfiguration()
