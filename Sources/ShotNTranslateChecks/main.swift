@@ -109,11 +109,25 @@ private func checkCaptureFoundation() throws {
     let image = try renderedTextImage("HELLO")
     let recognized = try TextRecognizer.recognize(in: image)
     try expect(recognized.text.uppercased().contains("HELLO"), "Vision reads rendered text, got \(recognized.text)")
+
+    let page = try renderedTextImage(
+        "Install and open the latest Mac release",
+        width: 1400,
+        height: 1800,
+        fontSize: 18,
+        dark: true
+    )
+    let pageText = try TextRecognizer.recognize(in: page).text.lowercased()
+    try expect(pageText.contains("install"), "Small text in a tall dark capture is read, got \(pageText)")
 }
 
-private func renderedTextImage(_ text: String) throws -> CGImage {
-    let width = 1200
-    let height = 240
+private func renderedTextImage(
+    _ text: String,
+    width: Int = 1200,
+    height: Int = 240,
+    fontSize: CGFloat = 96,
+    dark: Bool = false
+) throws -> CGImage {
     guard let rep = NSBitmapImageRep(
         bitmapDataPlanes: nil,
         pixelsWide: width,
@@ -130,13 +144,13 @@ private func renderedTextImage(_ text: String) throws -> CGImage {
     }
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    NSColor.white.setFill()
+    (dark ? NSColor.black : NSColor.white).setFill()
     NSRect(x: 0, y: 0, width: width, height: height).fill()
     let attributes: [NSAttributedString.Key: Any] = [
-        .font: NSFont.systemFont(ofSize: 96, weight: .bold),
-        .foregroundColor: NSColor.black
+        .font: NSFont.systemFont(ofSize: fontSize, weight: .regular),
+        .foregroundColor: dark ? NSColor.white : NSColor.black
     ]
-    (text as NSString).draw(at: NSPoint(x: 40, y: 60), withAttributes: attributes)
+    (text as NSString).draw(at: NSPoint(x: 40, y: CGFloat(height) - fontSize - 24), withAttributes: attributes)
     NSGraphicsContext.restoreGraphicsState()
     guard let image = rep.cgImage else {
         throw CheckError(description: "Could not read the text image")
