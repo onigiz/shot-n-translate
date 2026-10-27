@@ -53,6 +53,8 @@ public enum L10nKey: CaseIterable, Sendable {
     case languageNotDetected
     case translationUnavailable
     case screenRecordingDenied
+    case openScreenRecordingSettings
+    case relaunchApp
     case captureFailed
     case recognitionFailed
 }
@@ -177,7 +179,9 @@ public enum L10n {
         case .alreadyInTargetLanguage: "Metin zaten hedef dilde."
         case .languageNotDetected: "Yazının dili tespit edilemedi."
         case .translationUnavailable: "Bu dil çifti için çeviri kullanılamıyor. Sistem Ayarları'ndan çeviri dilini indirin."
-        case .screenRecordingDenied: "Ekran Kaydı izni bu sürüme geçmemiş. Sistem Ayarları'nda Shot n Translate anahtarını kapatıp açın, sonra uygulamayı yeniden başlatın."
+        case .screenRecordingDenied: "Ekran Kaydı bu uygulama için henüz etkin değil. Sistem Ayarları'nda bir kez izin verin, sonra uygulamayı kapatıp yeniden açın."
+        case .openScreenRecordingSettings: "Ekran Kaydı Ayarlarını Aç"
+        case .relaunchApp: "Kapatıp Yeniden Aç"
         case .captureFailed: "Ekran görüntüsü alınamadı."
         case .recognitionFailed: "Yazı okunamadı."
         }
@@ -236,7 +240,9 @@ public enum L10n {
         case .alreadyInTargetLanguage: "The text is already in the target language."
         case .languageNotDetected: "The language of the text could not be detected."
         case .translationUnavailable: "Translation is not available for this language pair. Download the language in System Settings."
-        case .screenRecordingDenied: "Screen Recording permission does not cover this build. In System Settings, turn Shot n Translate off and on, then reopen the app."
+        case .screenRecordingDenied: "Screen Recording is not active for this app yet. Allow it once in System Settings, then quit and reopen."
+        case .openScreenRecordingSettings: "Open Screen Recording Settings"
+        case .relaunchApp: "Quit and Reopen"
         case .captureFailed: "The screenshot could not be captured."
         case .recognitionFailed: "The text could not be read."
         }

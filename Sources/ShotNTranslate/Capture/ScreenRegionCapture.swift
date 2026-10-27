@@ -14,11 +14,6 @@ enum ScreenRegionCapture {
     /// `SCScreenshotManager.captureImage(in:)` only reads the main display, so a
     /// region on another screen comes back black.
     static func image(forAppKitRect rect: CGRect) async throws -> CGImage {
-        if !CGPreflightScreenCaptureAccess() {
-            _ = CGRequestScreenCaptureAccess()
-            throw ScreenCaptureFailure(permissionDenied: true)
-        }
-
         let content: SCShareableContent
         do {
             content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -128,6 +123,7 @@ enum ScreenRegionCapture {
 
     private static func map(_ error: Error) -> Error {
         if permissionDenied(error) {
+            _ = CGRequestScreenCaptureAccess()
             return ScreenCaptureFailure(permissionDenied: true)
         }
         return error

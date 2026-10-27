@@ -52,6 +52,18 @@ struct TranslationResultView: View {
                             systemImage: "exclamationmark.triangle"
                         )
                         .frame(maxWidth: .infinity, minHeight: 160)
+                        if key == .screenRecordingDenied {
+                            VStack(spacing: 10) {
+                                Button(L10n.string(.openScreenRecordingSettings, language: language)) {
+                                    ScreenRecordingAccess.openSettings()
+                                }
+                                Button(L10n.string(.relaunchApp, language: language)) {
+                                    ScreenRecordingAccess.relaunch()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .keyboardShortcut(.defaultAction)
+                            }
+                        }
                         if let preview = translator.capturePreview {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(L10n.string(.capturedRegion, language: language))

@@ -78,8 +78,7 @@ cat > "$app/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-# Screen Recording permission is stored for a signed app. An unsigned bundle is
-# refused even when the switch in System Settings is on.
-codesign --force --sign - "$app"
+# A stable local certificate keeps Screen Recording permission across rebuilds.
+bash "$root/scripts/sign-app.sh" "$app" "$bundle_id"
 
 echo "$app"
