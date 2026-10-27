@@ -51,31 +51,11 @@ public enum TextRecognizer {
             return lhs.boundingBox.minX < rhs.boundingBox.minX
         }
 
-        var languageVotes: [String: Int] = [:]
-        var lines: [String] = []
-        for observation in observations {
-            guard let candidate = observation.topCandidates(1).first else { continue }
-            let line = candidate.string.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !line.isEmpty else { continue }
-            lines.append(line)
-            for language in observation.recognitionLanguages {
-                let raw = language.languageCode.map(\.identifier) ?? language.maximalIdentifier
-                let base = LanguageDetector.baseCode(raw)
-                guard !base.isEmpty, base != "und" else { continue }
-                languageVotes[base, default: 0] += 1
-            }
+        let lines = observations.compactMap { observation -> String? in
+            guard let line = observation.topCandidates(1).first?.string else { return nil }
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
         }
-
-        let text = lines.joined(separator: "\n")
-        let visionLanguageCodes = languageVotes
-            .sorted { lhs, rhs in
-                if lhs.value == rhs.value {
-                    return lhs.key < rhs.key
-                }
-                return lhs.value > rhs.value
-            }
-            .map(\.key)
-
-        return RecognizedText(text: text, visionLanguageCodes: visionLanguageCodes)
+        return RecognizedText(text: lines.joined(separator: "\n"))
     }
 }
