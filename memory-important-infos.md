@@ -11,7 +11,8 @@ Shot n Translate is a macOS-only app. It processes a screenshot, detects text in
 - Capture: ScreenCaptureKit. Text recognition: Vision. Source-language detection: NaturalLanguage. Translation: Translation. PDF: PDFKit.
 - Region translation is built. The user drags a rectangle, the app reads the text, detects its language, and translates it into the selected target. The result window shows the detected language, the original text, and the translation.
 - Source-language detection uses NaturalLanguage hypotheses and script heuristics (for example Turkish diacritics). Short plain Latin OCR text falls back to English. The installed Vision SDK does not expose a per-line recognition language, so that hint is not read. If the code is still unknown, translation still runs with an automatic source language.
-- Text recognition sets Vision `minimumTextHeight` to 0. The default ignores text shorter than 1/32 of the image, so a tall page of body text was reported as empty. If automatic language detection still returns nothing, recognition retries with English and Turkish.
+- Text recognition normalizes the screenshot to 8-bit sRGB before Vision, because a wide-gamut capture can contain the page and still return no text. `minimumTextHeight` is a tiny positive fraction so body text in a tall region is kept; 0 was not enough on the installed 0.3.0 build. If the capture is blank, the app tries the rectangle in the other screen coordinate space. When no text is found, the result window shows the captured image.
+- 0.3.0 installed from the menu and still reported no text for a full text region. 0.3.1 is the local fix for that. It is not published until a Mac packages and uploads the zip.
 - Translation uses SwiftUI `translationTask`, so macOS can ask the user to download a missing language. If the text is already in the target language, it is not sent to the translator.
 - PDF export is not built yet.
 - Screen Recording permission is required. The packaged app declares `NSScreenCaptureUsageDescription`.
@@ -33,7 +34,7 @@ Shot n Translate is a macOS-only app. It processes a screenshot, detects text in
 - Patch notes are the English GitHub Release text. Show them as published. Do not translate them per language.
 - The repository is public. Release checks and downloads work without a GitHub account.
 - Publish stable releases only. The asset is `ShotNTranslate.zip` and it contains `Shot n Translate.app`.
-- Published releases: 0.1.0, 0.2.0, and 0.3.0. 0.3.0 is the current release. Its zip is `ShotNTranslate.zip`, version 0.3.0, build 3, and it contains region translation. The 0.2.0 zip was built before that feature. Source marketing version is 0.3.0, build 3. The in-menu install of 0.3.0 has not been clicked through yet.
+- Published releases: 0.1.0, 0.2.0, and 0.3.0. 0.3.0 is the current published release. Its zip is `ShotNTranslate.zip`, version 0.3.0, build 3, and it contains region translation. The user installed 0.3.0 from the menu; that build still reported no text for a full text region. Source marketing version is now 0.3.1, build 4. 0.3.1 is not published.
 - Version and bundle identity live in `Sources/ShotNTranslateCore/AppReleaseIdentity.swift`.
 
 ## Repository

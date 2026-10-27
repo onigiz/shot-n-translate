@@ -45,10 +45,27 @@ struct TranslationResultView: View {
                 ProgressView(L10n.string(.readingSelection, language: language))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .failure(let key):
-                ContentUnavailableView(
-                    L10n.string(key, language: language),
-                    systemImage: "exclamationmark.triangle"
-                )
+                ScrollView {
+                    VStack(spacing: 16) {
+                        ContentUnavailableView(
+                            L10n.string(key, language: language),
+                            systemImage: "exclamationmark.triangle"
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 160)
+                        if let preview = translator.capturePreview {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(L10n.string(.capturedRegion, language: language))
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Image(nsImage: preview)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxWidth: .infinity, maxHeight: 280)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                    }
+                }
             case .result(let result):
                 resultBody(result, language: language)
             }

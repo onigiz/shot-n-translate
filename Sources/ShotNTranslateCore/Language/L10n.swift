@@ -44,6 +44,7 @@ public enum L10nKey: CaseIterable, Sendable {
     case readingSelection
     case translating
     case noTextFound
+    case capturedRegion
     case detectedLanguage
     case originalText
     case translationResult
@@ -168,6 +169,7 @@ public enum L10n {
         case .readingSelection: "Yazı okunuyor…"
         case .translating: "Çevriliyor…"
         case .noTextFound: "Bu bölgede yazı bulunamadı."
+        case .capturedRegion: "Yakalanan bölge"
         case .detectedLanguage: "Tespit edilen dil"
         case .originalText: "Orijinal"
         case .translationResult: "Çeviri"
@@ -226,6 +228,7 @@ public enum L10n {
         case .readingSelection: "Reading text…"
         case .translating: "Translating…"
         case .noTextFound: "No text was found in this region."
+        case .capturedRegion: "Captured region"
         case .detectedLanguage: "Detected language"
         case .originalText: "Original"
         case .translationResult: "Translation"

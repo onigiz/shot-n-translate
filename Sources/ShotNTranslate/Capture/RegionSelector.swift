@@ -75,7 +75,10 @@ final class RegionSelector {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
         }
-        windows.forEach { $0.orderOut(nil) }
+        windows.forEach {
+            $0.alphaValue = 0
+            $0.orderOut(nil)
+        }
         windows.removeAll()
         NSCursor.arrow.set()
         let continuation = continuation

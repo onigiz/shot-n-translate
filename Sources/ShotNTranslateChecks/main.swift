@@ -119,6 +119,9 @@ private func checkCaptureFoundation() throws {
     )
     let pageText = try TextRecognizer.recognize(in: page).text.lowercased()
     try expect(pageText.contains("install"), "Small text in a tall dark capture is read, got \(pageText)")
+    try expect(TextRecognizer.contrast(page) > 0.2, "A text page has visible contrast")
+    let blank = try renderedTextImage(" ", width: 200, height: 200, fontSize: 12, dark: true)
+    try expect(TextRecognizer.contrast(blank) < 0.04, "A black capture has no contrast")
 }
 
 private func renderedTextImage(

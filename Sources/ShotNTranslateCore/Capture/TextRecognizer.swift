@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Vision
 
 public struct RecognizedText: Equatable, Sendable {
@@ -18,29 +19,100 @@ public enum TextRecognizer {
     private static let fallbackRecognitionLanguages = ["en-US", "tr-TR"]
 
     public static func recognize(in image: CGImage) throws -> RecognizedText {
-        let automatic = try recognize(in: image, recognitionLanguages: nil)
+        let image = standardImage(image)
+        let automatic = try recognize(in: image, level: .accurate, recognitionLanguages: nil)
         if !automatic.text.isEmpty {
             return automatic
         }
-        do {
-            return try recognize(in: image, recognitionLanguages: fallbackRecognitionLanguages)
-        } catch {
-            return automatic
+        if let fallback = try? recognize(in: image, level: .accurate, recognitionLanguages: fallbackRecognitionLanguages),
+           !fallback.text.isEmpty {
+            return fallback
         }
+        if let fast = try? recognize(in: image, level: .fast, recognitionLanguages: fallbackRecognitionLanguages),
+           !fast.text.isEmpty {
+            return fast
+        }
+        if let boosted = boostedContrast(image),
+           let boostedText = try? recognize(in: boosted, level: .accurate, recognitionLanguages: fallbackRecognitionLanguages),
+           !boostedText.text.isEmpty {
+            return boostedText
+        }
+        return automatic
     }
 
-    private static func recognize(in image: CGImage, recognitionLanguages: [String]?) throws -> RecognizedText {
+    /// Luminance range from 0 to 1. A black permission capture is near 0.
+    public static func contrast(_ image: CGImage) -> Double {
+        let side = 48
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.genericGrayGamma2_2),
+              let context = CGContext(
+                data: nil,
+                width: side,
+                height: side,
+                bitsPerComponent: 8,
+                bytesPerRow: side,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+              ),
+              let data = context.data else {
+            return 1
+        }
+        context.interpolationQuality = .low
+        context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        let pixels = data.bindMemory(to: UInt8.self, capacity: side * side)
+        var minimum = 255
+        var maximum = 0
+        for index in 0..<(side * side) {
+            let value = Int(pixels[index])
+            minimum = min(minimum, value)
+            maximum = max(maximum, value)
+        }
+        return Double(maximum - minimum) / 255
+    }
+
+    /// ScreenCaptureKit can return wide-gamut or floating-point images. Vision then
+    /// reports no text even though the page is visible. Draw into 8-bit sRGB first.
+    public static func standardImage(_ image: CGImage) -> CGImage {
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0,
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+              ) else {
+            return image
+        }
+        context.interpolationQuality = .none
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage() ?? image
+    }
+
+    private static func recognize(
+        in image: CGImage,
+        level: VNRequestTextRecognitionLevel,
+        recognitionLanguages: [String]?
+    ) throws -> RecognizedText {
         let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = true
-        // The default threshold is 1/32 of the image height, so body text in a tall
-        // screenshot is discarded and the region looks empty.
-        request.minimumTextHeight = 0
+        request.recognitionLevel = level
+        if level == .accurate {
+            request.usesLanguageCorrection = true
+        }
+        // One pixel of height. The default is 1/32 of the image, and 0 was ignored
+        // by the installed toolchain, so a tall page of body text came back empty.
+        request.minimumTextHeight = 1 / Float(max(image.height, 1))
         if let recognitionLanguages {
             request.automaticallyDetectsLanguage = false
             request.recognitionLanguages = recognitionLanguages
-        } else {
+        } else if level == .accurate {
             request.automaticallyDetectsLanguage = true
+        } else {
+            request.automaticallyDetectsLanguage = false
+            request.recognitionLanguages = fallbackRecognitionLanguages
         }
         let handler = VNImageRequestHandler(cgImage: image)
         try handler.perform([request])
@@ -57,5 +129,18 @@ public enum TextRecognizer {
             return trimmed.isEmpty ? nil : trimmed
         }
         return RecognizedText(text: lines.joined(separator: "\n"))
+    }
+
+    /// Light gray body text on a near-black page is valid text. Stretching contrast
+    /// gives Vision a last chance after the normal passes return nothing.
+    private static func boostedContrast(_ image: CGImage) -> CGImage? {
+        let input = CIImage(cgImage: image)
+        guard let filter = CIFilter(name: "CIColorControls") else { return nil }
+        filter.setValue(input, forKey: kCIInputImageKey)
+        filter.setValue(1.6, forKey: kCIInputContrastKey)
+        filter.setValue(0.12, forKey: kCIInputBrightnessKey)
+        guard let output = filter.outputImage else { return nil }
+        let context = CIContext(options: nil)
+        return context.createCGImage(output, from: output.extent)
     }
 }
