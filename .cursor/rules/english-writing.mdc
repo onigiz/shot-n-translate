@@ -1,0 +1,33 @@
+---
+description: Write commits, pull requests, and patch notes in English
+alwaysApply: true
+---
+
+# English for changes and releases
+
+Commit messages, pull request titles, pull request bodies, GitHub Release titles, and patch notes are written in English.
+
+Keep user-facing strings in both English and Turkish through `L10nKey`. Patch notes shown in the app are the English release text. Do not translate a release per language.
+
+## Examples
+
+Good commit:
+
+```text
+Add an in-app update history with install and restore actions.
+```
+
+Bad commit:
+
+```text
+Uygulama içi güncelleme geçmişini ekle.
+```
+
+Good patch notes:
+
+```text
+## 0.2.0
+
+- Add a choice to translate into English or Turkish.
+- Detect the source language automatically.
+```

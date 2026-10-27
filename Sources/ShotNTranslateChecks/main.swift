@@ -1,0 +1,310 @@
+import Foundation
+import ShotNTranslateCore
+
+@main
+struct ShotNTranslateChecks {
+    static func main() async {
+        do {
+            try checkLocalization()
+            try await checkPreferences()
+            try checkReleases()
+            try await checkInstaller()
+            try await checkPrivateRepositoryAccess()
+            print("All checks passed")
+        } catch {
+            fputs("\(error)\n", stderr)
+            Foundation.exit(1)
+        }
+    }
+}
+
+private struct CheckError: Error, CustomStringConvertible {
+    var description: String
+}
+
+private func expect(_ condition: Bool, _ message: String) throws {
+    if !condition {
+        throw CheckError(description: message)
+    }
+}
+
+private func checkLocalization() throws {
+    let identicalOnPurpose: Set<L10nKey> = [.languageOptionTurkish, .languageOptionEnglish]
+    for key in L10nKey.allCases {
+        let turkish = L10n.string(key, language: .turkish)
+        let english = L10n.string(key, language: .english)
+        try expect(!turkish.isEmpty, "Missing Turkish string for \(key)")
+        try expect(!english.isEmpty, "Missing English string for \(key)")
+        if identicalOnPurpose.contains(key) {
+            try expect(turkish == english, "\(key) should match in both languages")
+        } else {
+            try expect(turkish != english, "\(key) should differ between languages")
+        }
+    }
+    try expect(L10n.string(.languageOptionTurkish, language: .english) == "Türkçe", "Turkish language label")
+    try expect(L10n.string(.languageOptionEnglish, language: .turkish) == "English", "English language label")
+    try expect(L10n.string(.patchNotesLanguageCaption, language: .turkish).contains("İngilizce"), "Patch note caption")
+    for language in AppLanguage.allCases {
+        try expect(!L10n.installedVersionLine("0.1.0 (1)", language: language).isEmpty, "Installed version line")
+        try expect(L10n.menuUpdateAvailable(version: "0.2.0", language: language).contains("0.2.0"), "Update menu line")
+    }
+    try expect(
+        L10n.confirmUpdateMessage(version: "0.2.0", language: .turkish)
+            != L10n.confirmUpdateMessage(version: "0.2.0", language: .english),
+        "Update confirmation should be localized"
+    )
+}
+
+@MainActor
+private func checkPreferences() async throws {
+    let languageDefaults = makeDefaults()
+    let languageStore = LanguageStore(defaults: languageDefaults)
+    try expect(AppLanguage.defaultLanguage == .turkish, "Default app language")
+    try expect(languageStore.language == .turkish, "Unset app language")
+
+    let storedLanguage = makeDefaults()
+    storedLanguage.set(AppLanguage.english.rawValue, forKey: LanguageStore.storageKey)
+    try expect(LanguageStore(defaults: storedLanguage).language == .english, "Stored app language")
+
+    let unknownLanguage = makeDefaults()
+    unknownLanguage.set("de", forKey: LanguageStore.storageKey)
+    try expect(LanguageStore(defaults: unknownLanguage).language == .defaultLanguage, "Unknown app language")
+
+    let persistedLanguage = makeDefaults()
+    let editableLanguage = LanguageStore(defaults: persistedLanguage)
+    editableLanguage.language = .english
+    try expect(LanguageStore(defaults: persistedLanguage).language == .english, "Persisted app language")
+
+    let targetDefaults = makeDefaults()
+    let settings = TranslationSettings(defaults: targetDefaults)
+    try expect(TranslationTarget.defaultTarget == .turkish, "Default translation target")
+    try expect(settings.target == .turkish, "Unset translation target")
+    settings.target = .english
+    try expect(TranslationSettings(defaults: targetDefaults).target == .english, "Persisted translation target")
+}
+
+private func checkReleases() throws {
+    try expect(SemanticVersion(parsing: "v0.1.0") == SemanticVersion(major: 0, minor: 1, patch: 0), "v prefix")
+    try expect(SemanticVersion(parsing: "1.2") == nil, "Reject short versions")
+    try expect(SemanticVersion(parsing: "1.2.3-beta") == nil, "Reject pre-release tags")
+    try expect(SemanticVersion(parsing: AppReleaseIdentity.marketingVersion) != nil, "Marketing version")
+
+    let older = SemanticVersion(major: 0, minor: 1, patch: 9)
+    let current = SemanticVersion(major: 0, minor: 2, patch: 0)
+    let newer = SemanticVersion(major: 0, minor: 2, patch: 1)
+    try expect(versionRelation(of: newer, to: current) == .newer, "Newer relation")
+    try expect(versionRelation(of: current, to: current) == .current, "Current relation")
+    try expect(versionRelation(of: older, to: current) == .older, "Older relation")
+
+    let releases = try GitHubReleasesFeed.parse(Data(sampleFeed.utf8))
+    try expect(releases.map(\.version.description) == ["0.3.0", "0.2.0"], "Release order")
+    try expect(releases[1].notes == "Add English as a translation target.", "English notes stay unchanged")
+    try expect(
+        releases[1].downloadURL?.absoluteString == "https://api.github.com/repos/onigiz/shot-n-translate/releases/assets/22",
+        "Preferred zip asset"
+    )
+
+    let official = URL(string: "https://github.com/onigiz/shot-n-translate/releases/download/v0.2.0/ShotNTranslate.zip")!
+    let apiAsset = URL(string: "https://api.github.com/repos/onigiz/shot-n-translate/releases/assets/22")!
+    let otherRepo = URL(string: "https://github.com/example/shot-n-translate/releases/download/v0.2.0/ShotNTranslate.zip")!
+    try expect(ReleaseAssetPolicy.isOfficialDownloadURL(official), "Official asset URL")
+    try expect(ReleaseAssetPolicy.isOfficialDownloadURL(apiAsset), "Official API asset URL")
+    try expect(!ReleaseAssetPolicy.isOfficialDownloadURL(otherRepo), "Foreign asset URL")
+    try expect(AppRelauncher.script.contains("ditto") && AppRelauncher.script.contains("open"), "Relaunch script")
+}
+
+@MainActor
+private func checkInstaller() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("snt-checks-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    _ = try makeApp(named: "Helper.app", in: root)
+    let preferred = try makeApp(named: "\(AppReleaseIdentity.applicationName).app", in: root)
+    let found = try AppArchive.locateApplication(in: root)
+    try expect(found.standardizedFileURL == preferred.standardizedFileURL, "Preferred app in archive")
+
+    let empty = root.appendingPathComponent("empty", isDirectory: true)
+    try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+    do {
+        _ = try AppArchive.locateApplication(in: empty)
+        throw CheckError(description: "Empty archive should fail")
+    } catch let failure as UpdateFailure {
+        try expect(failure == .archiveDoesNotContainApp, "Empty archive error")
+    }
+
+    let packaged = try makeApp(named: "\(AppReleaseIdentity.applicationName).app", in: root.appendingPathComponent("package", isDirectory: true))
+    let zip = root.appendingPathComponent("ShotNTranslate.zip")
+    try zipApp(packaged, to: zip)
+    let destination = try makeApp(named: "Installed.app", in: root.appendingPathComponent("dest", isDirectory: true))
+    let recorder = RelaunchRecorder()
+    let installer = AppUpdateInstaller(
+        bundleURL: { destination },
+        download: { _ in zip },
+        relaunch: { staged, dest in
+            recorder.staged = staged
+            recorder.destination = dest
+        }
+    )
+    let center = UpdateCenter(
+        feed: StaticFeed(releases: []),
+        installer: installer,
+        current: AppVersion(marketing: SemanticVersion(major: 0, minor: 1, patch: 0), build: 1)
+    )
+    let quitter = QuitRecorder()
+    center.quit = { quitter.count += 1 }
+    await center.install(AppRelease(
+        version: SemanticVersion(major: 0, minor: 2, patch: 0),
+        publishedAt: nil,
+        notes: "English notes stay English.",
+        downloadURL: URL(string: "https://github.com/onigiz/shot-n-translate/releases/download/v0.2.0/ShotNTranslate.zip"),
+        releaseURL: nil
+    ))
+    try expect(quitter.count == 1, "Install quits the app")
+    try expect(center.status == .installing, "Install status")
+    try expect(recorder.destination == destination, "Install destination")
+    if let staged = recorder.staged {
+        try? FileManager.default.removeItem(at: staged)
+    }
+
+    let blocked = UpdateCenter(
+        feed: StaticFeed(releases: []),
+        installer: AppUpdateInstaller(
+            bundleURL: { URL(fileURLWithPath: "/tmp/Shot n Translate.app") },
+            download: { _ in throw UpdateFailure.downloadFailed },
+            relaunch: { _, _ in }
+        ),
+        current: AppReleaseIdentity.fallback
+    )
+    let blockedQuit = QuitRecorder()
+    blocked.quit = { blockedQuit.count += 1 }
+    await blocked.install(AppRelease(
+        version: SemanticVersion(major: 9, minor: 0, patch: 0),
+        publishedAt: nil,
+        notes: "",
+        downloadURL: URL(string: "https://example.com/ShotNTranslate.zip"),
+        releaseURL: nil
+    ))
+    try expect(blockedQuit.count == 0, "Untrusted download does not quit")
+    try expect(blocked.status == .failed(.untrustedDownloadURL), "Untrusted download status")
+
+    let history = UpdateCenter(
+        feed: StaticFeed(releases: [
+            AppRelease(version: SemanticVersion(major: 0, minor: 1, patch: 0), publishedAt: nil, notes: "Older.", downloadURL: nil, releaseURL: nil),
+            AppRelease(version: SemanticVersion(major: 0, minor: 3, patch: 0), publishedAt: nil, notes: "Newer.", downloadURL: nil, releaseURL: nil),
+            AppRelease(version: SemanticVersion(major: 0, minor: 2, patch: 0), publishedAt: nil, notes: "Current.", downloadURL: nil, releaseURL: nil)
+        ]),
+        installer: AppUpdateInstaller(bundleURL: { nil }, download: { _ in throw UpdateFailure.downloadFailed }, relaunch: { _, _ in }),
+        current: AppVersion(marketing: SemanticVersion(major: 0, minor: 2, patch: 0), build: 1)
+    )
+    await history.checkForUpdates()
+    try expect(history.releases.map(\.version.description) == ["0.3.0", "0.2.0", "0.1.0"], "History order")
+    try expect(history.relation(of: history.releases[0]) == .newer, "Newest relation")
+    try expect(history.relation(of: history.releases[2]) == .older, "Oldest relation")
+    try expect(history.newestUpdate?.notes == "Newer.", "Newest notes")
+}
+
+private func checkPrivateRepositoryAccess() async throws {
+    let releases = try await GitHubReleasesFeed().fetch()
+    guard let url = releases.compactMap(\.downloadURL).first else { return }
+    let file = try await ReleaseDownloader.download(url)
+    defer { try? FileManager.default.removeItem(at: file) }
+    let header = try Data(contentsOf: file, options: [.mappedIfSafe]).prefix(2)
+    try expect(Array(header) == [0x50, 0x4b], "Release package is a zip")
+}
+
+private struct StaticFeed: ReleaseFetching {
+    var releases: [AppRelease]
+    func fetch() async throws -> [AppRelease] { releases }
+}
+
+private final class RelaunchRecorder: @unchecked Sendable {
+    var staged: URL?
+    var destination: URL?
+}
+
+private final class QuitRecorder: @unchecked Sendable {
+    var count = 0
+}
+
+private func makeDefaults() -> UserDefaults {
+    let name = "ShotNTranslateChecks.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: name)!
+    defaults.removePersistentDomain(forName: name)
+    return defaults
+}
+
+private func makeApp(named name: String, in root: URL) throws -> URL {
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let app = root.appendingPathComponent(name)
+    try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+    try Data("plist".utf8).write(to: app.appendingPathComponent("Contents/Info.plist"))
+    return app
+}
+
+private func zipApp(_ app: URL, to zip: URL) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+    process.arguments = ["-c", "-k", "--keepParent", app.path, zip.path]
+    try process.run()
+    process.waitUntilExit()
+    try expect(process.terminationStatus == 0, "ditto zip")
+}
+
+private let sampleFeed = """
+[
+  {
+    "tag_name": "v0.2.0",
+    "body": "Add English as a translation target.",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-09-01T12:00:00Z",
+    "html_url": "https://github.com/onigiz/shot-n-translate/releases/tag/v0.2.0",
+    "assets": [
+      {
+        "name": "Other.zip",
+        "id": 11,
+        "browser_download_url": "https://github.com/onigiz/shot-n-translate/releases/download/v0.2.0/Other.zip"
+      },
+      {
+        "name": "ShotNTranslate.zip",
+        "id": 22,
+        "browser_download_url": "https://github.com/onigiz/shot-n-translate/releases/download/v0.2.0/ShotNTranslate.zip"
+      }
+    ]
+  },
+  {
+    "tag_name": "v0.3.0",
+    "body": "Show update history.",
+    "draft": false,
+    "prerelease": false,
+    "published_at": "2026-10-01T12:00:00Z",
+    "html_url": "https://github.com/onigiz/shot-n-translate/releases/tag/v0.3.0",
+    "assets": [
+      {
+        "name": "ShotNTranslate.zip",
+        "id": 33,
+        "browser_download_url": "https://github.com/onigiz/shot-n-translate/releases/download/v0.3.0/ShotNTranslate.zip"
+      }
+    ]
+  },
+  {
+    "tag_name": "v0.4.0",
+    "body": "Beta notes",
+    "draft": false,
+    "prerelease": true,
+    "published_at": "2026-10-02T12:00:00Z",
+    "html_url": "https://github.com/onigiz/shot-n-translate/releases/tag/v0.4.0",
+    "assets": []
+  },
+  {
+    "tag_name": "v0.9.0",
+    "body": "Draft notes",
+    "draft": true,
+    "prerelease": false,
+    "published_at": "2026-10-03T12:00:00Z",
+    "html_url": "https://github.com/onigiz/shot-n-translate/releases/tag/v0.9.0",
+    "assets": []
+  }
+]
+"""
