@@ -15,6 +15,7 @@ if [[ -z "$apple_identity" ]]; then
   apple_identity="$(security find-identity -p codesigning -v | sed -n 's/.*"\(Developer ID Application:[^"]*\)"/\1/p' | head -n 1)"
 fi
 if [[ -n "$apple_identity" ]]; then
+  echo "Signing with: $apple_identity"
   codesign --force --sign "$apple_identity" --identifier "$bundle_id" --timestamp=none "$app"
   exit 0
 fi
