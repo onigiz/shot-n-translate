@@ -57,10 +57,20 @@ enum ScreenRegionCapture {
         }
 
         if let content = try? await loadShareableContent() {
+            if let window = windowUnderSelection(rect, content: content) {
+                do {
+                    consider(try await captureWindow(window, selection: rect, scale: screen.backingScaleFactor))
+                    if bestScore >= 0.01 {
+                        return best!
+                    }
+                } catch {
+                    note(error)
+                }
+            }
             let display = content.displays.first { $0.displayID == displayID(of: screen) }
                 ?? content.displays.first
             if let display {
-                let filter = contentFilter(for: display, content: content)
+                let filter = contentFilter(for: display, content: content, screenFrame: screen.frame)
                 for candidate in [local, appKitLocal] {
                     do {
                         consider(try await capture(filter: filter, localRect: candidate, scale: screen.backingScaleFactor))
@@ -142,6 +152,58 @@ enum ScreenRegionCapture {
         throw box.error ?? ScreenCaptureFailure(permissionDenied: false)
     }
 
+    /// The display capture can return the desktop picture behind every window.
+    /// The window under the selection has the page pixels themselves.
+    private static func windowUnderSelection(_ rect: CGRect, content: SCShareableContent) -> SCWindow? {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let floor = CGWindowLevelForKey(.normalWindow)
+        let hits = content.windows.filter { window in
+            window.isOnScreen
+                && window.frame.contains(center)
+                && window.owningApplication?.processID != pid
+                && window.windowLayer >= floor
+                && window.frame.width >= 40
+                && window.frame.height >= 40
+        }
+        return hits.min { lhs, rhs in
+            if lhs.windowLayer != rhs.windowLayer {
+                return lhs.windowLayer > rhs.windowLayer
+            }
+            return lhs.frame.width * lhs.frame.height < rhs.frame.width * rhs.frame.height
+        }
+    }
+
+    private static func captureWindow(_ window: SCWindow, selection: CGRect, scale: CGFloat) async throws -> CGImage {
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let measuredScale = CGFloat(filter.pointPixelScale)
+        let pointScale = measuredScale > 0 ? measuredScale : max(scale, 1)
+        let size = window.frame.size
+        let configuration = SCStreamConfiguration()
+        configuration.sourceRect = CGRect(origin: .zero, size: size)
+        configuration.width = max(Int((size.width * pointScale).rounded()), 1)
+        configuration.height = max(Int((size.height * pointScale).rounded()), 1)
+        configuration.showsCursor = false
+        configuration.capturesAudio = false
+        configuration.shouldBeOpaque = true
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+        let fromTop = CGRect(
+            x: selection.minX - window.frame.minX,
+            y: window.frame.height - (selection.maxY - window.frame.minY),
+            width: selection.width,
+            height: selection.height
+        )
+        let fromBottom = CGRect(
+            x: selection.minX - window.frame.minX,
+            y: selection.minY - window.frame.minY,
+            width: selection.width,
+            height: selection.height
+        )
+        let choices = [fromTop, fromBottom].compactMap { crop($0, in: image, unitSize: size) } + [image]
+        return choices.max { TextRecognizer.brightPixelFraction($0) < TextRecognizer.brightPixelFraction($1) } ?? image
+    }
+
     private static func capture(filter: SCContentFilter, localRect: CGRect, scale: CGFloat) async throws -> CGImage {
         let measuredScale = CGFloat(filter.pointPixelScale)
         let pointScale = measuredScale > 0 ? measuredScale : max(scale, 1)
@@ -171,8 +233,12 @@ enum ScreenRegionCapture {
     }
 
     private static func crop(_ image: CGImage, localPoints: CGRect, screen: NSScreen) -> CGImage? {
-        let scaleX = CGFloat(image.width) / max(screen.frame.width, 1)
-        let scaleY = CGFloat(image.height) / max(screen.frame.height, 1)
+        crop(localPoints, in: image, unitSize: screen.frame.size)
+    }
+
+    private static func crop(_ localPoints: CGRect, in image: CGImage, unitSize: CGSize) -> CGImage? {
+        let scaleX = CGFloat(image.width) / max(unitSize.width, 1)
+        let scaleY = CGFloat(image.height) / max(unitSize.height, 1)
         let rect = CGRect(
             x: localPoints.origin.x * scaleX,
             y: localPoints.origin.y * scaleY,
@@ -187,16 +253,23 @@ enum ScreenRegionCapture {
         try await SCScreenshotManager.captureImage(in: rect)
     }
 
-    private static func contentFilter(for display: SCDisplay, content: SCShareableContent) -> SCContentFilter {
+    private static func contentFilter(
+        for display: SCDisplay,
+        content: SCShareableContent,
+        screenFrame: CGRect
+    ) -> SCContentFilter {
         let pid = ProcessInfo.processInfo.processIdentifier
-        let bundleID = Bundle.main.bundleIdentifier
-        let ownApps = content.applications.filter { app in
-            app.processID == pid || (bundleID != nil && app.bundleIdentifier == bundleID)
+        let floor = CGWindowLevelForKey(.normalWindow)
+        let windows = content.windows.filter { window in
+            window.isOnScreen
+                && window.frame.intersects(screenFrame)
+                && window.owningApplication?.processID != pid
+                && window.windowLayer >= floor
         }
-        if ownApps.isEmpty {
+        if windows.isEmpty {
             return SCContentFilter(display: display, excludingWindows: [])
         }
-        return SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
+        return SCContentFilter(display: display, including: windows)
     }
 
     private static func screen(containing rect: CGRect) -> NSScreen? {
