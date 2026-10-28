@@ -64,47 +64,87 @@ public enum TextRecognizer {
     }
 
     private static func luminanceSamples(_ image: CGImage) -> [UInt8]? {
-        let side = 64
-        guard let colorSpace = CGColorSpace(name: CGColorSpace.genericGrayGamma2_2),
-              let context = CGContext(
-                data: nil,
-                width: side,
-                height: side,
-                bitsPerComponent: 8,
-                bytesPerRow: side,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.none.rawValue
-              ),
-              let data = context.data else {
-            return nil
+        let drawn = samplesByDrawing(image)
+        if let drawn, drawn.contains(where: { $0 >= 160 }) {
+            return drawn
         }
-        context.interpolationQuality = .medium
-        context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
-        let bytes = data.bindMemory(to: UInt8.self, capacity: side * side)
-        return Array(UnsafeBufferPointer(start: bytes, count: side * side))
+        return samplesFromBuffer(image) ?? drawn
     }
 
-    /// ScreenCaptureKit can return wide-gamut or floating-point images. Vision then
-    /// reports no text even though the page is visible. Draw into 8-bit sRGB first.
+    /// ScreenCaptureKit images are 32-bit BGRA. Drawing them into an RGBA context
+    /// produces a black image, so Vision then reports that the page has no text.
     public static func standardImage(_ image: CGImage) -> CGImage {
-        let width = image.width
-        let height = image.height
+        guard let rendered = draw(image, width: image.width, height: image.height) else {
+            return image
+        }
+        if brightPixelFraction(rendered) + 0.005 < brightPixelFraction(image) {
+            return image
+        }
+        return rendered
+    }
+
+    private static func samplesByDrawing(_ image: CGImage) -> [UInt8]? {
+        guard let rendered = draw(image, width: 64, height: 64) else { return nil }
+        return samplesFromBuffer(rendered)
+    }
+
+    private static func draw(_ image: CGImage, width: Int, height: Int) -> CGImage? {
         guard width > 0, height > 0,
-              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-              let context = CGContext(
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+            return nil
+        }
+        let bitmapInfos: [UInt32] = [
+            CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue,
+            CGImageAlphaInfo.noneSkipLast.rawValue
+        ]
+        var best: CGImage?
+        var bestPeak = -1
+        for bitmapInfo in bitmapInfos {
+            guard let context = CGContext(
                 data: nil,
                 width: width,
                 height: height,
                 bitsPerComponent: 8,
                 bytesPerRow: 0,
                 space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-              ) else {
-            return image
+                bitmapInfo: bitmapInfo
+            ) else {
+                continue
+            }
+            context.interpolationQuality = width == image.width ? .none : .medium
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            guard let rendered = context.makeImage() else { continue }
+            let peak = samplesFromBuffer(rendered)?.max().map(Int.init) ?? 0
+            if peak > bestPeak {
+                best = rendered
+                bestPeak = peak
+            }
         }
-        context.interpolationQuality = .none
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return context.makeImage() ?? image
+        return best
+    }
+
+    private static func samplesFromBuffer(_ image: CGImage) -> [UInt8]? {
+        guard image.bitsPerComponent == 8,
+              let data = image.dataProvider?.data,
+              let base = CFDataGetBytePtr(data) else {
+            return nil
+        }
+        let length = CFDataGetLength(data)
+        let bytesPerPixel = image.bitsPerPixel / 8
+        guard bytesPerPixel >= 3, image.bytesPerRow >= image.width * bytesPerPixel else {
+            return nil
+        }
+        var samples: [UInt8] = []
+        let stepX = max(image.width / 64, 1)
+        let stepY = max(image.height / 64, 1)
+        for y in stride(from: 0, to: image.height, by: stepY) {
+            for x in stride(from: 0, to: image.width, by: stepX) {
+                let offset = y * image.bytesPerRow + x * bytesPerPixel
+                guard offset + 2 < length else { continue }
+                samples.append(max(base[offset], base[offset + 1], base[offset + 2]))
+            }
+        }
+        return samples.isEmpty ? nil : samples
     }
 
     private static func recognize(

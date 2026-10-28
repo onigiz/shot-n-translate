@@ -78,6 +78,7 @@ final class RegionSelector {
         windows.forEach {
             $0.alphaValue = 0
             $0.orderOut(nil)
+            $0.close()
         }
         windows.removeAll()
         NSCursor.arrow.set()

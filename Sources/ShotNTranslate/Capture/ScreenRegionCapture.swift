@@ -39,6 +39,13 @@ enum ScreenRegionCapture {
             width: local.width,
             height: local.height
         )
+        let scale = screen.backingScaleFactor
+        let pixelRect = CGRect(
+            x: local.origin.x * scale,
+            y: local.origin.y * scale,
+            width: local.width * scale,
+            height: local.height * scale
+        ).integral
 
         var best: CGImage?
         var bestScore = -1.0
@@ -54,6 +61,13 @@ enum ScreenRegionCapture {
         func note(_ error: Error) {
             if permissionDenied(error) {
                 sawPermissionError = true
+            }
+        }
+
+        if let displayImage = CGDisplayCreateImage(displayID(of: screen), rect: pixelRect) {
+            consider(displayImage)
+            if bestScore >= 0.01 {
+                return displayImage
             }
         }
 

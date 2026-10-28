@@ -37,6 +37,13 @@ final class ScreenshotTranslator {
         let instruction = L10n.string(.dragToSelect, language: languageStore.language)
         let selector = RegionSelector()
         guard let rect = await selector.select(instruction: instruction) else { return }
+        // The selection shade is full-screen. Capturing before it leaves the
+        // compositor produces a black rectangle where the page was.
+        do {
+            try await Task.sleep(nanoseconds: 400_000_000)
+        } catch {
+            return
+        }
 
         capturePreview = nil
         pendingText = nil
