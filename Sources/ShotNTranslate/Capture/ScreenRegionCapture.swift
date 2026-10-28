@@ -39,14 +39,6 @@ enum ScreenRegionCapture {
             width: local.width,
             height: local.height
         )
-        let scale = screen.backingScaleFactor
-        let pixelRect = CGRect(
-            x: local.origin.x * scale,
-            y: local.origin.y * scale,
-            width: local.width * scale,
-            height: local.height * scale
-        ).integral
-
         var best: CGImage?
         var bestScore = -1.0
         var sawPermissionError = false
@@ -64,13 +56,6 @@ enum ScreenRegionCapture {
             }
         }
 
-        if let displayImage = CGDisplayCreateImage(displayID(of: screen), rect: pixelRect) {
-            consider(displayImage)
-            if bestScore >= 0.01 {
-                return displayImage
-            }
-        }
-
         if let content = try? await loadShareableContent() {
             let display = content.displays.first { $0.displayID == displayID(of: screen) }
                 ?? content.displays.first
@@ -84,6 +69,21 @@ enum ScreenRegionCapture {
                     }
                     if bestScore >= 0.01 {
                         return best!
+                    }
+                }
+                if bestScore < 0.01 {
+                    do {
+                        let full = try await captureFullDisplay(filter: filter, screen: screen)
+                        for candidate in [local, appKitLocal] {
+                            if let cropped = crop(full, localPoints: candidate, screen: screen) {
+                                consider(cropped)
+                            }
+                            if bestScore >= 0.01 {
+                                return best!
+                            }
+                        }
+                    } catch {
+                        note(error)
                     }
                 }
             }
@@ -154,6 +154,33 @@ enum ScreenRegionCapture {
         configuration.shouldBeOpaque = true
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+    }
+
+    private static func captureFullDisplay(filter: SCContentFilter, screen: NSScreen) async throws -> CGImage {
+        let measuredScale = CGFloat(filter.pointPixelScale)
+        let pointScale = measuredScale > 0 ? measuredScale : max(screen.backingScaleFactor, 1)
+        let configuration = SCStreamConfiguration()
+        configuration.sourceRect = CGRect(origin: .zero, size: screen.frame.size)
+        configuration.width = max(Int((screen.frame.width * pointScale).rounded()), 1)
+        configuration.height = max(Int((screen.frame.height * pointScale).rounded()), 1)
+        configuration.showsCursor = false
+        configuration.capturesAudio = false
+        configuration.shouldBeOpaque = true
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+    }
+
+    private static func crop(_ image: CGImage, localPoints: CGRect, screen: NSScreen) -> CGImage? {
+        let scaleX = CGFloat(image.width) / max(screen.frame.width, 1)
+        let scaleY = CGFloat(image.height) / max(screen.frame.height, 1)
+        let rect = CGRect(
+            x: localPoints.origin.x * scaleX,
+            y: localPoints.origin.y * scaleY,
+            width: localPoints.width * scaleX,
+            height: localPoints.height * scaleY
+        ).integral.intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard !rect.isNull, rect.width >= 1, rect.height >= 1 else { return nil }
+        return image.cropping(to: rect)
     }
 
     private static func captureRect(_ rect: CGRect) async throws -> CGImage {
