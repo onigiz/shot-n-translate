@@ -57,6 +57,23 @@ enum ScreenRegionCapture {
         }
 
         if let content = try? await loadShareableContent() {
+            let display = content.displays.first { $0.displayID == displayID(of: screen) }
+                ?? content.displays.first
+            if let display {
+                do {
+                    let full = try await captureVisibleDisplay(display)
+                    for candidate in [local, appKitLocal] {
+                        if let cropped = crop(full, localPoints: candidate, screen: screen) {
+                            consider(cropped)
+                        }
+                        if bestScore >= 0.01 {
+                            return best!
+                        }
+                    }
+                } catch {
+                    note(error)
+                }
+            }
             if let window = windowUnderSelection(rect, content: content) {
                 do {
                     consider(try await captureWindow(window, selection: rect, scale: screen.backingScaleFactor))
@@ -67,8 +84,6 @@ enum ScreenRegionCapture {
                     note(error)
                 }
             }
-            let display = content.displays.first { $0.displayID == displayID(of: screen) }
-                ?? content.displays.first
             if let display {
                 let filter = contentFilter(for: display, content: content, screenFrame: screen.frame)
                 for candidate in [local, appKitLocal] {
@@ -115,6 +130,9 @@ enum ScreenRegionCapture {
         }
 
         if let best {
+            if TextRecognizer.brightPixelFraction(best) < 0.004, !CGPreflightScreenCaptureAccess() {
+                throw ScreenCaptureFailure(permissionDenied: true)
+            }
             return best
         }
         // The switch in System Settings can be on for this app while a fresh
@@ -202,6 +220,19 @@ enum ScreenRegionCapture {
         )
         let choices = [fromTop, fromBottom].compactMap { crop($0, in: image, unitSize: size) } + [image]
         return choices.max { TextRecognizer.brightPixelFraction($0) < TextRecognizer.brightPixelFraction($1) } ?? image
+    }
+
+    /// The whole display, as composited, with no source rectangle. A partial
+    /// rectangle was coming back as the empty desktop behind the windows.
+    private static func captureVisibleDisplay(_ display: SCDisplay) async throws -> CGImage {
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let configuration = SCStreamConfiguration()
+        configuration.width = display.width
+        configuration.height = display.height
+        configuration.showsCursor = false
+        configuration.capturesAudio = false
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
     }
 
     private static func capture(filter: SCContentFilter, localRect: CGRect, scale: CGFloat) async throws -> CGImage {

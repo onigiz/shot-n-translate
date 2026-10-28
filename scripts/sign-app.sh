@@ -6,6 +6,19 @@ set -euo pipefail
 
 app="${1:?app path}"
 bundle_id="${2:?bundle id}"
+
+# An Apple Development identity keeps Screen Recording across rebuilds.
+# A self-signed certificate does not: each new binary is captured as black
+# while System Settings still shows the previous switch as on.
+apple_identity="$(security find-identity -p codesigning -v | sed -n 's/.*"\(Apple Development:[^"]*\)"/\1/p' | head -n 1)"
+if [[ -z "$apple_identity" ]]; then
+  apple_identity="$(security find-identity -p codesigning -v | sed -n 's/.*"\(Developer ID Application:[^"]*\)"/\1/p' | head -n 1)"
+fi
+if [[ -n "$apple_identity" ]]; then
+  codesign --force --sign "$apple_identity" --identifier "$bundle_id" --timestamp=none "$app"
+  exit 0
+fi
+
 identity="Shot n Translate Development"
 support="${HOME}/Library/Application Support/Shot n Translate/signing"
 p12="$support/ShotNTranslateDev.p12"
