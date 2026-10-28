@@ -83,6 +83,16 @@ private func checkCaptureFoundation() async throws {
         onSecondary == CGRect(x: 80, y: 380, width: 400, height: 200),
         "A secondary-display selection is local to that display's top-left"
     )
+    try expect(
+        CaptureCoordinateSpace.screencaptureRectArgument(CGRect(x: 10.4, y: 20.6, width: 100.2, height: 50.8))
+            == "10,21,100,51",
+        "screencapture -R uses rounded Quartz x,y,w,h"
+    )
+    try expect(
+        CaptureCoordinateSpace.screencaptureRectArgument(CGRect(x: 0, y: 0, width: 0.2, height: 0.2))
+            == "0,0,1,1",
+        "screencapture -R keeps at least a 1x1 region"
+    )
 
     let english = LanguageDetector.detectCode(in: "Hello, the weather in the city is very nice and the sea was calm today.")
     let turkish = LanguageDetector.detectCode(in: "Merhaba, bugün İstanbul'da hava çok güzel ve deniz oldukça sakindi.")
@@ -139,9 +149,32 @@ private func checkCaptureFoundation() async throws {
     try expect(stackedText.contains("settings"), "Bottom line of a tall capture is read, got \(stackedText)")
     try expect(TextRecognizer.contrast(page) > 0.2, "A text page has visible contrast")
     try expect(TextRecognizer.brightPixelFraction(page) > 0.01, "A text page has light pixels")
+    try expect(TextRecognizer.shouldInvertForOCR(page), "A dark text page should be inverted for OCR")
+    try expect(TextRecognizer.meanLuminance(page) < 0.45, "A dark text page has low mean luminance")
+    if let inverted = TextRecognizer.invertedImage(page) {
+        try expect(
+            TextRecognizer.meanLuminance(inverted) > TextRecognizer.meanLuminance(page),
+            "Inverting a dark page raises mean luminance"
+        )
+    } else {
+        throw CheckError(description: "Dark page inversion should produce an image")
+    }
     let blank = try renderedTextImage(" ", width: 200, height: 200, fontSize: 12, dark: true)
     try expect(TextRecognizer.contrast(blank) < 0.04, "A black capture has no contrast")
     try expect(TextRecognizer.brightPixelFraction(blank) < 0.004, "A black capture has no light pixels")
+    try expect(!TextRecognizer.shouldInvertForOCR(blank), "A black capture should not be inverted")
+
+    let softDark = try renderedTextImage(
+        "Soft gray body text on a dark IDE background",
+        width: 1600,
+        height: 900,
+        fontSize: 28,
+        dark: true,
+        foreground: NSColor(white: 0.72, alpha: 1)
+    )
+    let softText = try await TextRecognizer.recognize(in: softDark).text.lowercased()
+    try expect(softText.contains("soft") || softText.contains("gray") || softText.contains("ide"),
+               "Soft light text on a dark page is read, got \(softText)")
 }
 
 private func renderedTextImage(
@@ -149,7 +182,8 @@ private func renderedTextImage(
     width: Int = 1200,
     height: Int = 240,
     fontSize: CGFloat = 96,
-    dark: Bool = false
+    dark: Bool = false,
+    foreground: NSColor? = nil
 ) throws -> CGImage {
     guard let rep = NSBitmapImageRep(
         bitmapDataPlanes: nil,
@@ -169,9 +203,10 @@ private func renderedTextImage(
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
     (dark ? NSColor.black : NSColor.white).setFill()
     NSRect(x: 0, y: 0, width: width, height: height).fill()
+    let textColor = foreground ?? (dark ? NSColor.white : NSColor.black)
     let attributes: [NSAttributedString.Key: Any] = [
         .font: NSFont.systemFont(ofSize: fontSize, weight: .regular),
-        .foregroundColor: dark ? NSColor.white : NSColor.black
+        .foregroundColor: textColor
     ]
     (text as NSString).draw(at: NSPoint(x: 40, y: CGFloat(height) - fontSize - 24), withAttributes: attributes)
     NSGraphicsContext.restoreGraphicsState()

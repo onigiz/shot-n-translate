@@ -1,6 +1,8 @@
 import AppKit
 import CoreGraphics
 import CoreVideo
+import Foundation
+import ImageIO
 import ScreenCaptureKit
 import ShotNTranslateCore
 
@@ -137,10 +139,46 @@ enum ScreenRegionCapture {
             }
         }
 
+        // ScreenCaptureKit can still return a black or empty-desktop crop after
+        // permission is granted. The system screencapture tool usually returns
+        // the composited pixels OCR needs, so always consider it and keep the
+        // brightest candidate.
+        for candidate in [quartz, rect] {
+            if let image = try? captureWithScreencapture(quartzRect: candidate) {
+                consider(image)
+            }
+        }
+
         if let best {
             return best
         }
         throw ScreenCaptureFailure(permissionDenied: false)
+    }
+
+    /// Uses `/usr/sbin/screencapture -R` in Quartz global coordinates.
+    private static func captureWithScreencapture(quartzRect: CGRect) throws -> CGImage? {
+        guard quartzRect.width >= 1, quartzRect.height >= 1 else { return nil }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("snt-screencapture-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        process.arguments = [
+            "-x",
+            "-t", "png",
+            "-R", CaptureCoordinateSpace.screencaptureRectArgument(quartzRect),
+            url.path
+        ]
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              CGImageSourceGetCount(source) > 0,
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return nil
+        }
+        return image
     }
 
     static func permissionDenied(_ error: Error) -> Bool {

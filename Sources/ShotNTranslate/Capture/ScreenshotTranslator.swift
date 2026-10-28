@@ -40,7 +40,7 @@ final class ScreenshotTranslator {
         // The selection shade is full-screen. Capturing before it leaves the
         // compositor produces a black rectangle where the page was.
         do {
-            try await Task.sleep(nanoseconds: 400_000_000)
+            try await Task.sleep(nanoseconds: 550_000_000)
         } catch {
             return
         }

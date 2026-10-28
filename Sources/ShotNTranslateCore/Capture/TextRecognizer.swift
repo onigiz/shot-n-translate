@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreImage
+import Foundation
 import ImageIO
 import Vision
 import VisionKit
@@ -20,22 +21,31 @@ public enum TextRecognizer {
     /// English and Turkish are the product's translation languages.
     private static let fallbackRecognitionLanguages = ["en-US", "tr-TR"]
 
-    /// Scans the whole screenshot and returns every line it can read.
-    /// Live Text looks at the entire image. A single Vision request measures
-    /// each line against the full height and drops body text in a tall capture,
-    /// so that path only runs when Live Text returns nothing, and it runs in bands.
+    /// How long an accurate Vision pass may block before a fast pass is tried.
+    private static let accurateTimeoutNanoseconds: UInt64 = 12_000_000_000
+
+    /// Scans the screenshot and returns the richest transcript it can read.
+    /// Live Text looks at the whole image. Vision also runs in horizontal bands
+    /// because a single request measures each line against the full height and
+    /// drops body text in a tall capture. Dark captures are inverted and scanned
+    /// again when the normal passes find nothing or only a thin result.
     public static func recognize(in image: CGImage) async throws -> RecognizedText {
         let image = standardImage(image)
-        let transcript = (try? await liveText(in: image))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !transcript.isEmpty {
-            return RecognizedText(text: transcript)
+        var candidates: [RecognizedText] = []
+
+        if let live = try? await liveText(in: image) {
+            appendCandidate(live, to: &candidates)
         }
-        let bands = recognizeInHorizontalBands(scaledIfWide(image))
-        if !bands.text.isEmpty {
-            return bands
+        appendCandidate(recognizeInHorizontalBands(scaledIfWide(image)), to: &candidates)
+
+        if shouldInvertForOCR(image), let inverted = invertedImage(image) {
+            if let live = try? await liveText(in: inverted) {
+                appendCandidate(live, to: &candidates)
+            }
+            appendCandidate(recognizeInHorizontalBands(scaledIfWide(inverted)), to: &candidates)
         }
-        return RecognizedText(text: "")
+
+        return bestCandidate(candidates) ?? RecognizedText(text: "")
     }
 
     @MainActor
@@ -67,6 +77,18 @@ public enum TextRecognizer {
             count + (value >= 160 ? 1 : 0)
         }
         return Double(bright) / Double(pixels.count)
+    }
+
+    /// Mean sample luminance from 0 to 1. Dark UI pages sit well below 0.5.
+    public static func meanLuminance(_ image: CGImage) -> Double {
+        guard let pixels = luminanceSamples(image), !pixels.isEmpty else { return 1 }
+        let total = pixels.reduce(0) { $0 + Int($1) }
+        return Double(total) / Double(pixels.count) / 255
+    }
+
+    /// Dark pages with real contrast are inverted so Vision sees dark text on light.
+    public static func shouldInvertForOCR(_ image: CGImage) -> Bool {
+        contrast(image) >= 0.08 && meanLuminance(image) <= 0.45
     }
 
     private static func luminanceSamples(_ image: CGImage) -> [UInt8]? {
@@ -178,19 +200,48 @@ public enum TextRecognizer {
         }
         let handler = VNImageRequestHandler(cgImage: image)
         try handler.perform([request])
-        let observations = (request.results ?? []).sorted { lhs, rhs in
-            if abs(lhs.boundingBox.midY - rhs.boundingBox.midY) > 0.02 {
-                return lhs.boundingBox.midY > rhs.boundingBox.midY
-            }
-            return lhs.boundingBox.minX < rhs.boundingBox.minX
+        return text(from: request.results ?? [])
+    }
+
+    /// Sorts observations into visual rows, then left-to-right within each row.
+    private static func text(from observations: [VNRecognizedTextObservation]) -> RecognizedText {
+        struct Line {
+            var text: String
+            var box: CGRect
         }
 
-        let lines = observations.compactMap { observation -> String? in
-            guard let line = observation.topCandidates(1).first?.string else { return nil }
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+        let lines = observations.compactMap { observation -> Line? in
+            guard let candidate = observation.topCandidates(1).first else { return nil }
+            let trimmed = candidate.string.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return Line(text: trimmed, box: observation.boundingBox)
         }
-        return RecognizedText(text: lines.joined(separator: "\n"))
+        guard !lines.isEmpty else { return RecognizedText(text: "") }
+
+        let ordered = lines.sorted { lhs, rhs in
+            if abs(lhs.box.midY - rhs.box.midY) > 0.02 {
+                return lhs.box.midY > rhs.box.midY
+            }
+            return lhs.box.minX < rhs.box.minX
+        }
+
+        var rows: [[Line]] = []
+        var currentRowMidY: CGFloat?
+        for line in ordered {
+            if let midY = currentRowMidY, abs(line.box.midY - midY) <= 0.03, var row = rows.last {
+                row.append(line)
+                rows[rows.count - 1] = row
+                currentRowMidY = row.reduce(CGFloat(0)) { $0 + $1.box.midY } / CGFloat(row.count)
+            } else {
+                rows.append([line])
+                currentRowMidY = line.box.midY
+            }
+        }
+
+        let joined = rows.map { row in
+            row.sorted { $0.box.minX < $1.box.minX }.map(\.text).joined(separator: " ")
+        }.joined(separator: "\n")
+        return RecognizedText(text: joined)
     }
 
     /// Tries the accurate and fast recognizers. One thrown request does not
@@ -205,7 +256,11 @@ public enum TextRecognizer {
         var lastError: Error?
         for attempt in attempts {
             do {
-                let recognized = try recognize(in: image, level: attempt.0, recognitionLanguages: attempt.1)
+                let recognized = try recognizeWithTimeout(
+                    in: image,
+                    level: attempt.0,
+                    recognitionLanguages: attempt.1
+                )
                 sawResult = true
                 if !recognized.text.isEmpty {
                     return recognized
@@ -214,10 +269,10 @@ public enum TextRecognizer {
                 lastError = error
             }
         }
-        if let boosted = boostedContrast(image) {
+        for variant in [boostedContrast(image), invertedImage(image)].compactMap({ $0 }) {
             do {
-                let recognized = try recognize(
-                    in: boosted,
+                let recognized = try recognizeWithTimeout(
+                    in: variant,
                     level: .accurate,
                     recognitionLanguages: fallbackRecognitionLanguages
                 )
@@ -233,6 +288,53 @@ public enum TextRecognizer {
             throw lastError
         }
         return nil
+    }
+
+    /// Accurate recognition can stall while macOS compiles the on-device model.
+    /// After the timeout, a fast pass still returns text for this capture.
+    private static func recognizeWithTimeout(
+        in image: CGImage,
+        level: VNRequestTextRecognitionLevel,
+        recognitionLanguages: [String]?
+    ) throws -> RecognizedText {
+        if level != .accurate {
+            return try recognize(in: image, level: level, recognitionLanguages: recognitionLanguages)
+        }
+
+        final class Box: @unchecked Sendable {
+            var result: Result<RecognizedText, Error>?
+        }
+        let box = Box()
+        let lock = NSLock()
+        let worker = Thread {
+            let outcome = Result {
+                try recognize(in: image, level: level, recognitionLanguages: recognitionLanguages)
+            }
+            lock.lock()
+            box.result = outcome
+            lock.unlock()
+        }
+        worker.qualityOfService = .userInitiated
+        worker.start()
+
+        let deadline = Date().addingTimeInterval(Double(accurateTimeoutNanoseconds) / 1_000_000_000)
+        while Date() < deadline {
+            lock.lock()
+            let ready = box.result
+            lock.unlock()
+            if let ready {
+                return try ready.get()
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
+        lock.lock()
+        let ready = box.result
+        lock.unlock()
+        if let ready {
+            return try ready.get()
+        }
+        return try recognize(in: image, level: .fast, recognitionLanguages: recognitionLanguages ?? fallbackRecognitionLanguages)
     }
 
     /// Retina captures of a wide window are large enough that one Vision request
@@ -276,20 +378,21 @@ public enum TextRecognizer {
     }
 
     private static func recognizeBand(_ image: CGImage) -> RecognizedText {
-        if let recognized = try? recognize(
+        if let recognized = try? recognizeWithTimeout(
             in: image,
             level: .accurate,
             recognitionLanguages: fallbackRecognitionLanguages
         ), !recognized.text.isEmpty {
             return recognized
         }
-        if let boosted = boostedContrast(image),
-           let recognized = try? recognize(
-               in: boosted,
-               level: .accurate,
-               recognitionLanguages: fallbackRecognitionLanguages
-           ), !recognized.text.isEmpty {
-            return recognized
+        for variant in [boostedContrast(image), invertedImage(image)].compactMap({ $0 }) {
+            if let recognized = try? recognizeWithTimeout(
+                in: variant,
+                level: .accurate,
+                recognitionLanguages: fallbackRecognitionLanguages
+            ), !recognized.text.isEmpty {
+                return recognized
+            }
         }
         return (try? recognize(in: image, level: .fast, recognitionLanguages: fallbackRecognitionLanguages))
             ?? RecognizedText(text: "")
@@ -306,5 +409,38 @@ public enum TextRecognizer {
         guard let output = filter.outputImage else { return nil }
         let context = CIContext(options: nil)
         return context.createCGImage(output, from: output.extent)
+    }
+
+    /// Dark UI / IDE screenshots often OCR better as dark text on a light page.
+    public static func invertedImage(_ image: CGImage) -> CGImage? {
+        let input = CIImage(cgImage: image)
+        guard let invert = CIFilter(name: "CIColorInvert") else { return nil }
+        invert.setValue(input, forKey: kCIInputImageKey)
+        guard let inverted = invert.outputImage else { return nil }
+        let context = CIContext(options: nil)
+        return context.createCGImage(inverted, from: inverted.extent)
+    }
+
+    private static func appendCandidate(_ text: String, to candidates: inout [RecognizedText]) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        candidates.append(RecognizedText(text: trimmed))
+    }
+
+    private static func appendCandidate(_ recognized: RecognizedText, to candidates: inout [RecognizedText]) {
+        let trimmed = recognized.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        candidates.append(RecognizedText(text: trimmed, visionLanguageCodes: recognized.visionLanguageCodes))
+    }
+
+    private static func bestCandidate(_ candidates: [RecognizedText]) -> RecognizedText? {
+        candidates.max { lhs, rhs in
+            let leftLines = lhs.text.split(separator: "\n", omittingEmptySubsequences: true).count
+            let rightLines = rhs.text.split(separator: "\n", omittingEmptySubsequences: true).count
+            if leftLines != rightLines {
+                return leftLines < rightLines
+            }
+            return lhs.text.count < rhs.text.count
+        }
     }
 }

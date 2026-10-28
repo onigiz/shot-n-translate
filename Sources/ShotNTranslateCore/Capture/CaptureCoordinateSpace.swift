@@ -29,4 +29,13 @@ public enum CaptureCoordinateSpace {
             height: clipped.height
         )
     }
+
+    /// `screencapture -R` expects `x,y,w,h` in Quartz global points (top-left origin).
+    public static func screencaptureRectArgument(_ rect: CGRect) -> String {
+        let x = Int(rect.origin.x.rounded())
+        let y = Int(rect.origin.y.rounded())
+        let width = max(Int(rect.width.rounded()), 1)
+        let height = max(Int(rect.height.rounded()), 1)
+        return "\(x),\(y),\(width),\(height)"
+    }
 }
