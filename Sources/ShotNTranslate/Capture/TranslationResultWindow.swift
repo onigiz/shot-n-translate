@@ -47,25 +47,39 @@ struct TranslationResultView: View {
             case .failure(let key):
                 ScrollView {
                     VStack(spacing: 16) {
-                        ContentUnavailableView(
-                            L10n.string(key, language: language),
-                            systemImage: "exclamationmark.triangle"
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 160)
                         if key == .screenRecordingDenied {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.secondary)
+                            Text(L10n.string(.screenRecordingDeniedTitle, language: language))
+                                .font(.title2.weight(.semibold))
+                                .multilineTextAlignment(.center)
+                            Text(L10n.string(.screenRecordingDenied, language: language))
+                                .font(.body)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
                             VStack(spacing: 10) {
                                 Button(L10n.string(.resetScreenRecordingPermission, language: language)) {
                                     ScreenRecordingAccess.resetGrant()
                                 }
                                 .buttonStyle(.borderedProminent)
+                                .controlSize(.large)
                                 Button(L10n.string(.relaunchApp, language: language)) {
                                     ScreenRecordingAccess.relaunch()
                                 }
-                                .keyboardShortcut(.defaultAction)
+                                .controlSize(.large)
                                 Button(L10n.string(.openScreenRecordingSettings, language: language)) {
                                     ScreenRecordingAccess.openSettings()
                                 }
                             }
+                            .padding(.top, 4)
+                        } else {
+                            ContentUnavailableView(
+                                L10n.string(key, language: language),
+                                systemImage: "exclamationmark.triangle"
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 160)
                         }
                         if let preview = translator.capturePreview {
                             VStack(alignment: .leading, spacing: 8) {
@@ -80,6 +94,7 @@ struct TranslationResultView: View {
                             }
                         }
                     }
+                    .frame(maxWidth: .infinity)
                 }
             case .result(let result):
                 resultBody(result, language: language)

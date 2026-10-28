@@ -53,6 +53,7 @@ public enum L10nKey: CaseIterable, Sendable {
     case languageNotDetected
     case translationUnavailable
     case screenRecordingDenied
+    case screenRecordingDeniedTitle
     case resetScreenRecordingPermission
     case openScreenRecordingSettings
     case relaunchApp
@@ -180,7 +181,8 @@ public enum L10n {
         case .alreadyInTargetLanguage: "Metin zaten hedef dilde."
         case .languageNotDetected: "Yazının dili tespit edilemedi."
         case .translationUnavailable: "Bu dil çifti için çeviri kullanılamıyor. Sistem Ayarları'ndan çeviri dilini indirin."
-        case .screenRecordingDenied: "Ekran kaydı bu kopyaya verilmedi. Anahtar açık kalsa da macOS eski izni tutar ve onay penceresini yeniden çıkarır. İzni Sıfırla'ya bir kez basın. Sistem penceresinde mavi Reddet'e değil, Sistem Ayarları'nı Aç'a basın ve anahtarı açın. Sonra Kapatıp Yeniden Aç'a basın."
+        case .screenRecordingDeniedTitle: "Ekran kaydı izni gerekli"
+        case .screenRecordingDenied: "Bu kopyaya henüz izin verilmedi. Anahtar açık görünse bile macOS eski izni tutuyor olabilir. Önce İzni Sıfırla'ya basın. Açılan pencerede mavi Reddet'e değil Sistem Ayarları'nı Aç'a basın, Shot n Translate anahtarını açın, sonra Kapatıp Yeniden Aç'a basın."
         case .resetScreenRecordingPermission: "İzni Sıfırla"
         case .openScreenRecordingSettings: "Ekran Kaydı Ayarlarını Aç"
         case .relaunchApp: "Kapatıp Yeniden Aç"
@@ -242,7 +244,8 @@ public enum L10n {
         case .alreadyInTargetLanguage: "The text is already in the target language."
         case .languageNotDetected: "The language of the text could not be detected."
         case .translationUnavailable: "Translation is not available for this language pair. Download the language in System Settings."
-        case .screenRecordingDenied: "Screen Recording is not granted to this copy. The switch can stay on while macOS keeps an old grant and shows the prompt again. Click Reset Permission once. In the system dialog, click Open System Settings, not the blue Deny button, and turn the switch on. Then click Quit and Reopen."
+        case .screenRecordingDeniedTitle: "Screen Recording permission required"
+        case .screenRecordingDenied: "This copy is not granted yet. The switch can stay on while macOS keeps an old grant. Click Reset Permission once. In the system dialog, choose Open System Settings — not the blue Deny button — turn Shot n Translate on, then Quit and Reopen."
         case .resetScreenRecordingPermission: "Reset Permission"
         case .openScreenRecordingSettings: "Open Screen Recording Settings"
         case .relaunchApp: "Quit and Reopen"
