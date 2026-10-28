@@ -8,49 +8,97 @@ struct ScreenCaptureFailure: Error {
     var permissionDenied: Bool
 }
 
+/// `SCShareableContent` is not Sendable. The box lets a background callback
+/// publish it without a system permission prompt.
+private final class ShareableContentBox: @unchecked Sendable {
+    var content: SCShareableContent?
+    var error: Error?
+}
+
 @MainActor
 enum ScreenRegionCapture {
     /// Captures the selection from the display that actually contains it.
-    /// `SCScreenshotManager.captureImage(in:)` only reads the main display, so a
-    /// region on another screen comes back black.
+    /// Asking the system for permission again is intentionally not done here.
+    /// The Settings switch can already be on while `CGRequestScreenCaptureAccess`
+    /// still presents a dialog, which traps the user in a grant loop.
     static func image(forAppKitRect rect: CGRect) async throws -> CGImage {
-        let content: SCShareableContent
-        do {
-            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        } catch {
-            throw map(error)
-        }
-        guard let screen = screen(containing: rect),
-              let display = content.displays.first(where: { $0.displayID == displayID(of: screen) })
-                ?? content.displays.first
-        else {
+        guard let screen = screen(containing: rect) else {
             throw ScreenCaptureFailure(permissionDenied: false)
         }
-
-        let filter = contentFilter(for: display, content: content)
         let local = CaptureCoordinateSpace.localDisplayRect(appKitRect: rect, screenFrame: screen.frame)
         guard local.width >= 1, local.height >= 1 else {
             throw ScreenCaptureFailure(permissionDenied: false)
         }
-
-        let primary = try await capture(filter: filter, localRect: local, scale: screen.backingScaleFactor)
-        if TextRecognizer.brightPixelFraction(primary) >= 0.01 {
-            return primary
-        }
-
-        // Some capture paths keep AppKit's bottom-left origin. Use that only when the
-        // top-left capture has no light text pixels.
+        let quartz = CaptureCoordinateSpace.displayRect(
+            fromAppKitRect: rect,
+            primaryScreenMaxY: NSScreen.screens.first?.frame.maxY ?? screen.frame.maxY
+        )
         let appKitLocal = CGRect(
             x: local.origin.x,
             y: screen.frame.height - local.maxY,
             width: local.width,
             height: local.height
         )
-        if let alternate = try? await capture(filter: filter, localRect: appKitLocal, scale: screen.backingScaleFactor),
-           TextRecognizer.brightPixelFraction(alternate) > TextRecognizer.brightPixelFraction(primary) {
-            return alternate
+
+        var best: CGImage?
+        var bestScore = -1.0
+        var sawPermissionError = false
+
+        func consider(_ image: CGImage) {
+            let score = TextRecognizer.brightPixelFraction(image)
+            if score > bestScore {
+                best = image
+                bestScore = score
+            }
         }
-        return primary
+        func note(_ error: Error) {
+            if permissionDenied(error) {
+                sawPermissionError = true
+            }
+        }
+
+        if let content = try? await loadShareableContent() {
+            let display = content.displays.first { $0.displayID == displayID(of: screen) }
+                ?? content.displays.first
+            if let display {
+                let filter = contentFilter(for: display, content: content)
+                for candidate in [local, appKitLocal] {
+                    do {
+                        consider(try await capture(filter: filter, localRect: candidate, scale: screen.backingScaleFactor))
+                    } catch {
+                        note(error)
+                    }
+                    if bestScore >= 0.01 {
+                        return best!
+                    }
+                }
+            }
+        } else {
+            sawPermissionError = !CGPreflightScreenCaptureAccess()
+        }
+
+        do {
+            consider(try await captureRect(quartz))
+        } catch {
+            note(error)
+        }
+        if bestScore < 0.01 {
+            do {
+                consider(try await captureRect(rect))
+            } catch {
+                note(error)
+            }
+        }
+
+        if let best {
+            return best
+        }
+        // The switch in System Settings can be on for this app while a fresh
+        // permission dialog still appears. Never request access from here.
+        if sawPermissionError && !CGPreflightScreenCaptureAccess() {
+            throw ScreenCaptureFailure(permissionDenied: true)
+        }
+        throw ScreenCaptureFailure(permissionDenied: false)
     }
 
     static func permissionDenied(_ error: Error) -> Bool {
@@ -63,26 +111,41 @@ enum ScreenRegionCapture {
             || nsError.code == SCStreamError.missingEntitlements.rawValue
     }
 
+    /// Listing shareable content on the main thread reports a false denial even
+    /// after Screen Recording has been allowed. The callback runs off the main thread.
+    private static func loadShareableContent() async throws -> SCShareableContent {
+        let box = ShareableContentBox()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) { content, error in
+                    box.content = content
+                    box.error = error
+                    continuation.resume()
+                }
+            }
+        }
+        if let content = box.content {
+            return content
+        }
+        throw box.error ?? ScreenCaptureFailure(permissionDenied: false)
+    }
+
     private static func capture(filter: SCContentFilter, localRect: CGRect, scale: CGFloat) async throws -> CGImage {
         let measuredScale = CGFloat(filter.pointPixelScale)
         let pointScale = measuredScale > 0 ? measuredScale : max(scale, 1)
-        let pixelsWide = max(Int((localRect.width * pointScale).rounded()), 1)
-        let pixelsHigh = max(Int((localRect.height * pointScale).rounded()), 1)
         let configuration = SCStreamConfiguration()
         configuration.sourceRect = localRect
-        configuration.width = pixelsWide
-        configuration.height = pixelsHigh
+        configuration.width = max(Int((localRect.width * pointScale).rounded()), 1)
+        configuration.height = max(Int((localRect.height * pointScale).rounded()), 1)
         configuration.showsCursor = false
         configuration.capturesAudio = false
         configuration.shouldBeOpaque = true
-        // An unset format lets an HDR display return a buffer that AppKit and Vision
-        // both read as an empty black image.
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
-        do {
-            return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
-        } catch {
-            throw map(error)
-        }
+        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+    }
+
+    private static func captureRect(_ rect: CGRect) async throws -> CGImage {
+        try await SCScreenshotManager.captureImage(in: rect)
     }
 
     private static func contentFilter(for display: SCDisplay, content: SCShareableContent) -> SCContentFilter {
@@ -119,13 +182,5 @@ enum ScreenRegionCapture {
             return number.uint32Value
         }
         return CGMainDisplayID()
-    }
-
-    private static func map(_ error: Error) -> Error {
-        if permissionDenied(error) {
-            _ = CGRequestScreenCaptureAccess()
-            return ScreenCaptureFailure(permissionDenied: true)
-        }
-        return error
     }
 }

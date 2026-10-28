@@ -24,7 +24,7 @@ enum ScreenRecordingAccess {
         }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 0.5 && open \"$1\"", "sh", appURL.path]
+        task.arguments = ["-c", "sleep 1 && open -n \"$1\"", "sh", appURL.path]
         try? task.run()
         NSApp.terminate(nil)
     }
