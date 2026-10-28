@@ -7,7 +7,7 @@ struct ShotNTranslateChecks {
     static func main() async {
         do {
             try checkLocalization()
-            try checkCaptureFoundation()
+            try await checkCaptureFoundation()
             try await checkPreferences()
             try checkReleases()
             try await checkInstaller()
@@ -57,7 +57,7 @@ private func checkLocalization() throws {
     )
 }
 
-private func checkCaptureFoundation() throws {
+private func checkCaptureFoundation() async throws {
     let primaryMaxY: CGFloat = 900
     let top = CaptureCoordinateSpace.displayRect(
         fromAppKitRect: CGRect(x: 10, y: 800, width: 100, height: 50),
@@ -116,7 +116,7 @@ private func checkCaptureFoundation() throws {
     )
 
     let image = try renderedTextImage("HELLO")
-    let recognized = try TextRecognizer.recognize(in: image)
+    let recognized = try await TextRecognizer.recognize(in: image)
     try expect(recognized.text.uppercased().contains("HELLO"), "Vision reads rendered text, got \(recognized.text)")
 
     let page = try renderedTextImage(
@@ -126,7 +126,7 @@ private func checkCaptureFoundation() throws {
         fontSize: 18,
         dark: true
     )
-    let pageText = try TextRecognizer.recognize(in: page).text.lowercased()
+    let pageText = try await TextRecognizer.recognize(in: page).text.lowercased()
     try expect(pageText.contains("install"), "Small text in a tall dark capture is read, got \(pageText)")
     let stacked = try renderedStackedLines(
         ["Install and open the latest Mac release", "Make it your own in Settings"],
@@ -134,7 +134,7 @@ private func checkCaptureFoundation() throws {
         height: 1800,
         fontSize: 18
     )
-    let stackedText = try TextRecognizer.recognize(in: stacked).text.lowercased()
+    let stackedText = try await TextRecognizer.recognize(in: stacked).text.lowercased()
     try expect(stackedText.contains("install"), "Top line of a tall capture is read, got \(stackedText)")
     try expect(stackedText.contains("settings"), "Bottom line of a tall capture is read, got \(stackedText)")
     try expect(TextRecognizer.contrast(page) > 0.2, "A text page has visible contrast")

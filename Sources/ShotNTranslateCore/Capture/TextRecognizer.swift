@@ -1,6 +1,8 @@
 import CoreGraphics
 import CoreImage
+import ImageIO
 import Vision
+import VisionKit
 
 public struct RecognizedText: Equatable, Sendable {
     public var text: String
@@ -18,24 +20,30 @@ public enum TextRecognizer {
     /// English and Turkish are the product's translation languages.
     private static let fallbackRecognitionLanguages = ["en-US", "tr-TR"]
 
-    public static func recognize(in image: CGImage) throws -> RecognizedText {
+    /// Scans the whole screenshot and returns every line it can read.
+    /// Live Text looks at the entire image. A single Vision request measures
+    /// each line against the full height and drops body text in a tall capture,
+    /// so that path only runs when Live Text returns nothing, and it runs in bands.
+    public static func recognize(in image: CGImage) async throws -> RecognizedText {
         let image = standardImage(image)
-        if let direct = try? recognizeAvailable(in: image), !direct.text.isEmpty {
-            return direct
+        let transcript = (try? await liveText(in: image))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !transcript.isEmpty {
+            return RecognizedText(text: transcript)
         }
-        // A tall or very wide capture makes each line a small fraction of the
-        // image, or too large for one request. The same text is readable in a
-        // short selection. Bands keep each line large enough for Vision.
-        let prepared = scaledIfWide(image)
-        if prepared.width != image.width,
-           let scaled = try? recognizeAvailable(in: prepared), !scaled.text.isEmpty {
-            return scaled
-        }
-        let bands = recognizeInHorizontalBands(prepared)
+        let bands = recognizeInHorizontalBands(scaledIfWide(image))
         if !bands.text.isEmpty {
             return bands
         }
         return RecognizedText(text: "")
+    }
+
+    @MainActor
+    private static func liveText(in image: CGImage) async throws -> String {
+        let analyzer = ImageAnalyzer()
+        let configuration = ImageAnalyzer.Configuration([.text])
+        let analysis = try await analyzer.analyze(image, orientation: .up, configuration: configuration)
+        return analysis.transcript
     }
 
     /// Luminance range from 0 to 1. A black permission capture is near 0.

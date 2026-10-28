@@ -66,7 +66,7 @@ final class ScreenshotTranslator {
 
         let recognized: RecognizedText?
         do {
-            recognized = try readableText(in: prepared)
+            recognized = try await readableText(in: prepared)
         } catch {
             presentation = .failure(.recognitionFailed)
             return
@@ -78,8 +78,8 @@ final class ScreenshotTranslator {
         presentation = .failure(.noTextFound)
     }
 
-    private func readableText(in image: CGImage) throws -> RecognizedText? {
-        let recognized = try TextRecognizer.recognize(in: image)
+    private func readableText(in image: CGImage) async throws -> RecognizedText? {
+        let recognized = try await TextRecognizer.recognize(in: image)
         guard !recognized.text.isEmpty else { return nil }
         return recognized
     }
