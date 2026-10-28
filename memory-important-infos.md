@@ -35,7 +35,7 @@ Shot n Translate is a macOS-only app. It processes a screenshot, detects text in
 - Patch notes are the English GitHub Release text. Show them as published. Do not translate them per language.
 - The repository is public. Release checks and downloads work without a GitHub account.
 - Publish stable releases only. The asset is `ShotNTranslate.zip` and it contains `Shot n Translate.app`.
-- Published releases: 0.1.0, 0.2.0, and 0.3.0. 0.3.0 is the current published release. Its zip is `ShotNTranslate.zip`, version 0.3.0, build 3, and it contains region translation. The user installed 0.3.0 from the menu. Source marketing version is now 0.3.12, build 15. 0.3.1 through 0.3.12 are not published.
+- Published releases: 0.1.0, 0.2.0, and 0.3.0. 0.3.0 is the current published release. Its zip is `ShotNTranslate.zip`, version 0.3.0, build 3, and it contains region translation. The user installed 0.3.0 from the menu. Source marketing version is now 0.3.13, build 16. 0.3.1 through 0.3.13 are not published.
 - Version and bundle identity live in `Sources/ShotNTranslateCore/AppReleaseIdentity.swift`.
 
 ## Repository
