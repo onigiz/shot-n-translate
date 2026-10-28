@@ -20,24 +20,22 @@ public enum TextRecognizer {
 
     public static func recognize(in image: CGImage) throws -> RecognizedText {
         let image = standardImage(image)
-        let automatic = try recognize(in: image, level: .accurate, recognitionLanguages: nil)
-        if !automatic.text.isEmpty {
-            return automatic
+        if let direct = try? recognizeAvailable(in: image), !direct.text.isEmpty {
+            return direct
         }
-        if let fallback = try? recognize(in: image, level: .accurate, recognitionLanguages: fallbackRecognitionLanguages),
-           !fallback.text.isEmpty {
-            return fallback
+        // A tall or very wide capture makes each line a small fraction of the
+        // image, or too large for one request. The same text is readable in a
+        // short selection. Bands keep each line large enough for Vision.
+        let prepared = scaledIfWide(image)
+        if prepared.width != image.width,
+           let scaled = try? recognizeAvailable(in: prepared), !scaled.text.isEmpty {
+            return scaled
         }
-        if let fast = try? recognize(in: image, level: .fast, recognitionLanguages: fallbackRecognitionLanguages),
-           !fast.text.isEmpty {
-            return fast
+        let bands = recognizeInHorizontalBands(prepared)
+        if !bands.text.isEmpty {
+            return bands
         }
-        if let boosted = boostedContrast(image),
-           let boostedText = try? recognize(in: boosted, level: .accurate, recognitionLanguages: fallbackRecognitionLanguages),
-           !boostedText.text.isEmpty {
-            return boostedText
-        }
-        return automatic
+        return RecognizedText(text: "")
     }
 
     /// Luminance range from 0 to 1. A black permission capture is near 0.
@@ -157,9 +155,10 @@ public enum TextRecognizer {
         if level == .accurate {
             request.usesLanguageCorrection = true
         }
-        // One pixel of height. The default is 1/32 of the image, and 0 was ignored
-        // by the installed toolchain, so a tall page of body text came back empty.
-        request.minimumTextHeight = 1 / Float(max(image.height, 1))
+        // The default is about 1/32 of the image. Zero is ignored and falls back
+        // to that default, which drops body text in a tall selection. A small
+        // explicit fraction stays in effect.
+        request.minimumTextHeight = 0.004
         if let recognitionLanguages {
             request.automaticallyDetectsLanguage = false
             request.recognitionLanguages = recognitionLanguages
@@ -184,6 +183,108 @@ public enum TextRecognizer {
             return trimmed.isEmpty ? nil : trimmed
         }
         return RecognizedText(text: lines.joined(separator: "\n"))
+    }
+
+    /// Tries the accurate and fast recognizers. One thrown request does not
+    /// hide a later pass that can still read the image.
+    private static func recognizeAvailable(in image: CGImage) throws -> RecognizedText? {
+        let attempts: [(VNRequestTextRecognitionLevel, [String]?)] = [
+            (.accurate, nil),
+            (.accurate, fallbackRecognitionLanguages),
+            (.fast, fallbackRecognitionLanguages)
+        ]
+        var sawResult = false
+        var lastError: Error?
+        for attempt in attempts {
+            do {
+                let recognized = try recognize(in: image, level: attempt.0, recognitionLanguages: attempt.1)
+                sawResult = true
+                if !recognized.text.isEmpty {
+                    return recognized
+                }
+            } catch {
+                lastError = error
+            }
+        }
+        if let boosted = boostedContrast(image) {
+            do {
+                let recognized = try recognize(
+                    in: boosted,
+                    level: .accurate,
+                    recognitionLanguages: fallbackRecognitionLanguages
+                )
+                sawResult = true
+                if !recognized.text.isEmpty {
+                    return recognized
+                }
+            } catch {
+                lastError = error
+            }
+        }
+        if !sawResult, let lastError {
+            throw lastError
+        }
+        return nil
+    }
+
+    /// Retina captures of a wide window are large enough that one Vision request
+    /// returns no text. The text stays readable at this width.
+    private static func scaledIfWide(_ image: CGImage) -> CGImage {
+        let maxWidth = 2000
+        guard image.width > maxWidth else { return image }
+        let scale = Double(maxWidth) / Double(image.width)
+        let height = max(Int((Double(image.height) * scale).rounded()), 1)
+        return draw(image, width: maxWidth, height: height) ?? image
+    }
+
+    private static func recognizeInHorizontalBands(_ image: CGImage) -> RecognizedText {
+        let bandHeight = 260
+        let overlap = 36
+        guard image.height > bandHeight else {
+            return (try? recognizeAvailable(in: image)) ?? RecognizedText(text: "")
+        }
+        var lines: [String] = []
+        var y = 0
+        while y < image.height {
+            let height = min(bandHeight, image.height - y)
+            let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+            let rect = CGRect(x: 0, y: y, width: image.width, height: height).integral.intersection(bounds)
+            if rect.width >= 1, rect.height >= 1, let band = image.cropping(to: rect) {
+                let recognized = recognizeBand(band)
+                for line in recognized.text.split(separator: "\n", omittingEmptySubsequences: true) {
+                    let text = String(line)
+                    if lines.suffix(3).contains(text) {
+                        continue
+                    }
+                    lines.append(text)
+                }
+            }
+            if y + height >= image.height {
+                break
+            }
+            y += bandHeight - overlap
+        }
+        return RecognizedText(text: lines.joined(separator: "\n"))
+    }
+
+    private static func recognizeBand(_ image: CGImage) -> RecognizedText {
+        if let recognized = try? recognize(
+            in: image,
+            level: .accurate,
+            recognitionLanguages: fallbackRecognitionLanguages
+        ), !recognized.text.isEmpty {
+            return recognized
+        }
+        if let boosted = boostedContrast(image),
+           let recognized = try? recognize(
+               in: boosted,
+               level: .accurate,
+               recognitionLanguages: fallbackRecognitionLanguages
+           ), !recognized.text.isEmpty {
+            return recognized
+        }
+        return (try? recognize(in: image, level: .fast, recognitionLanguages: fallbackRecognitionLanguages))
+            ?? RecognizedText(text: "")
     }
 
     /// Light gray body text on a near-black page is valid text. Stretching contrast

@@ -128,6 +128,15 @@ private func checkCaptureFoundation() throws {
     )
     let pageText = try TextRecognizer.recognize(in: page).text.lowercased()
     try expect(pageText.contains("install"), "Small text in a tall dark capture is read, got \(pageText)")
+    let stacked = try renderedStackedLines(
+        ["Install and open the latest Mac release", "Make it your own in Settings"],
+        width: 1600,
+        height: 1800,
+        fontSize: 18
+    )
+    let stackedText = try TextRecognizer.recognize(in: stacked).text.lowercased()
+    try expect(stackedText.contains("install"), "Top line of a tall capture is read, got \(stackedText)")
+    try expect(stackedText.contains("settings"), "Bottom line of a tall capture is read, got \(stackedText)")
     try expect(TextRecognizer.contrast(page) > 0.2, "A text page has visible contrast")
     try expect(TextRecognizer.brightPixelFraction(page) > 0.01, "A text page has light pixels")
     let blank = try renderedTextImage(" ", width: 200, height: 200, fontSize: 12, dark: true)
@@ -168,6 +177,53 @@ private func renderedTextImage(
     NSGraphicsContext.restoreGraphicsState()
     guard let image = rep.cgImage else {
         throw CheckError(description: "Could not read the text image")
+    }
+    return image
+}
+
+private func renderedStackedLines(
+    _ lines: [String],
+    width: Int,
+    height: Int,
+    fontSize: CGFloat
+) throws -> CGImage {
+    guard let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: width,
+        pixelsHigh: height,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ) else {
+        throw CheckError(description: "Could not create a stacked text image")
+    }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSColor.black.setFill()
+    NSRect(x: 0, y: 0, width: width, height: height).fill()
+    let attributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: fontSize, weight: .regular),
+        .foregroundColor: NSColor.white
+    ]
+    for (index, line) in lines.enumerated() {
+        let y: CGFloat
+        if index == 0 {
+            y = CGFloat(height) - fontSize - 24
+        } else if index == lines.count - 1 {
+            y = 40
+        } else {
+            let span = CGFloat(height) - fontSize - 80
+            y = 40 + span * CGFloat(index) / CGFloat(max(lines.count - 1, 1))
+        }
+        (line as NSString).draw(at: NSPoint(x: 40, y: y), withAttributes: attributes)
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    guard let image = rep.cgImage else {
+        throw CheckError(description: "Could not read the stacked text image")
     }
     return image
 }
