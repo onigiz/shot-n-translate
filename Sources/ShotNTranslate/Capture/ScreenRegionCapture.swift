@@ -112,18 +112,16 @@ enum ScreenRegionCapture {
     }
 
     /// Listing shareable content on the main thread reports a false denial even
-    /// after Screen Recording has been allowed. The callback runs off the main thread.
+    /// after Screen Recording has been allowed.
     private static func loadShareableContent() async throws -> SCShareableContent {
         let box = ShareableContentBox()
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) { content, error in
-                    box.content = content
-                    box.error = error
-                    continuation.resume()
-                }
+        await Task.detached(priority: .userInitiated) {
+            do {
+                box.content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            } catch {
+                box.error = error
             }
-        }
+        }.value
         if let content = box.content {
             return content
         }
