@@ -18,10 +18,13 @@ private final class ShareableContentBox: @unchecked Sendable {
 @MainActor
 enum ScreenRegionCapture {
     /// Captures the selection from the display that actually contains it.
-    /// Asking the system for permission again is intentionally not done here.
-    /// The Settings switch can already be on while `CGRequestScreenCaptureAccess`
-    /// still presents a dialog, which traps the user in a grant loop.
+    /// ScreenCaptureKit presents the system dialog on every call when the stored
+    /// grant does not match this binary. Preflight does not present a dialog,
+    /// so a missing grant stops here.
     static func image(forAppKitRect rect: CGRect) async throws -> CGImage {
+        guard CGPreflightScreenCaptureAccess() else {
+            throw ScreenCaptureFailure(permissionDenied: true)
+        }
         guard let screen = screen(containing: rect) else {
             throw ScreenCaptureFailure(permissionDenied: false)
         }
@@ -41,7 +44,6 @@ enum ScreenRegionCapture {
         )
         var best: CGImage?
         var bestScore = -1.0
-        var sawPermissionError = false
 
         func consider(_ image: CGImage) {
             let score = TextRecognizer.brightPixelFraction(image)
@@ -50,13 +52,21 @@ enum ScreenRegionCapture {
                 bestScore = score
             }
         }
-        func note(_ error: Error) {
+        func note(_ error: Error) throws {
             if permissionDenied(error) {
-                sawPermissionError = true
+                throw ScreenCaptureFailure(permissionDenied: true)
             }
         }
 
-        if let content = try? await loadShareableContent() {
+        let content: SCShareableContent?
+        do {
+            content = try await loadShareableContent()
+        } catch {
+            try note(error)
+            content = nil
+        }
+
+        if let content {
             let display = content.displays.first { $0.displayID == displayID(of: screen) }
                 ?? content.displays.first
             if let display {
@@ -71,7 +81,7 @@ enum ScreenRegionCapture {
                         }
                     }
                 } catch {
-                    note(error)
+                    try note(error)
                 }
             }
             if let window = windowUnderSelection(rect, content: content) {
@@ -81,7 +91,7 @@ enum ScreenRegionCapture {
                         return best!
                     }
                 } catch {
-                    note(error)
+                    try note(error)
                 }
             }
             if let display {
@@ -90,7 +100,7 @@ enum ScreenRegionCapture {
                     do {
                         consider(try await capture(filter: filter, localRect: candidate, scale: screen.backingScaleFactor))
                     } catch {
-                        note(error)
+                        try note(error)
                     }
                     if bestScore >= 0.01 {
                         return best!
@@ -108,37 +118,27 @@ enum ScreenRegionCapture {
                             }
                         }
                     } catch {
-                        note(error)
+                        try note(error)
                     }
                 }
             }
-        } else {
-            sawPermissionError = !CGPreflightScreenCaptureAccess()
         }
 
         do {
             consider(try await captureRect(quartz))
         } catch {
-            note(error)
+            try note(error)
         }
         if bestScore < 0.01 {
             do {
                 consider(try await captureRect(rect))
             } catch {
-                note(error)
+                try note(error)
             }
         }
 
         if let best {
-            if TextRecognizer.brightPixelFraction(best) < 0.004, !CGPreflightScreenCaptureAccess() {
-                throw ScreenCaptureFailure(permissionDenied: true)
-            }
             return best
-        }
-        // The switch in System Settings can be on for this app while a fresh
-        // permission dialog still appears. Never request access from here.
-        if sawPermissionError && !CGPreflightScreenCaptureAccess() {
-            throw ScreenCaptureFailure(permissionDenied: true)
         }
         throw ScreenCaptureFailure(permissionDenied: false)
     }

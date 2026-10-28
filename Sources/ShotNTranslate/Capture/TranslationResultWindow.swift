@@ -54,14 +54,17 @@ struct TranslationResultView: View {
                         .frame(maxWidth: .infinity, minHeight: 160)
                         if key == .screenRecordingDenied {
                             VStack(spacing: 10) {
-                                Button(L10n.string(.openScreenRecordingSettings, language: language)) {
-                                    ScreenRecordingAccess.openSettings()
+                                Button(L10n.string(.resetScreenRecordingPermission, language: language)) {
+                                    ScreenRecordingAccess.resetGrant()
                                 }
+                                .buttonStyle(.borderedProminent)
                                 Button(L10n.string(.relaunchApp, language: language)) {
                                     ScreenRecordingAccess.relaunch()
                                 }
-                                .buttonStyle(.borderedProminent)
                                 .keyboardShortcut(.defaultAction)
+                                Button(L10n.string(.openScreenRecordingSettings, language: language)) {
+                                    ScreenRecordingAccess.openSettings()
+                                }
                             }
                         }
                         if let preview = translator.capturePreview {

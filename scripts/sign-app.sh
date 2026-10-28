@@ -7,16 +7,35 @@ set -euo pipefail
 app="${1:?app path}"
 bundle_id="${2:?bundle id}"
 
+# Screen Recording is stored against the designated requirement, not the
+# Settings switch. An ad-hoc signature pins that requirement to the build
+# hash, so the switch stays on while every capture asks again.
+sign_app() {
+  local signing_identity="$1"
+  local requirement="${2:-}"
+  xattr -cr "$app" || true
+  if [[ -n "$requirement" ]]; then
+    codesign --force --sign "$signing_identity" --identifier "$bundle_id" --timestamp=none -r "$requirement" "$app"
+  else
+    codesign --force --sign "$signing_identity" --identifier "$bundle_id" --timestamp=none "$app"
+  fi
+  local req
+  req="$(codesign -d -r- "$app" 2>&1 || true)"
+  echo "Signing with: $signing_identity"
+  echo "$req"
+  if printf '%s\n' "$req" | grep -q 'cdhash'; then
+    echo "Screen Recording would reset on every package because the signature is pinned to this build." >&2
+    exit 1
+  fi
+}
+
 # An Apple Development identity keeps Screen Recording across rebuilds.
-# A self-signed certificate does not: each new binary is captured as black
-# while System Settings still shows the previous switch as on.
 apple_identity="$(security find-identity -p codesigning -v | sed -n 's/.*"\(Apple Development:[^"]*\)"/\1/p' | head -n 1)"
 if [[ -z "$apple_identity" ]]; then
   apple_identity="$(security find-identity -p codesigning -v | sed -n 's/.*"\(Developer ID Application:[^"]*\)"/\1/p' | head -n 1)"
 fi
 if [[ -n "$apple_identity" ]]; then
-  echo "Signing with: $apple_identity"
-  codesign --force --sign "$apple_identity" --identifier "$bundle_id" --timestamp=none "$app"
+  sign_app "$apple_identity"
   exit 0
 fi
 
@@ -29,7 +48,7 @@ password_file="$support/password"
 keychain="$(security default-keychain -d user | tr -d '"' | xargs)"
 
 identity_installed() {
-  security find-identity -p codesigning -v | grep -F "$identity" >/dev/null
+  security find-identity -p codesigning | grep -F "$identity" >/dev/null
 }
 
 if ! identity_installed; then
@@ -87,4 +106,6 @@ if ! identity_installed; then
   exit 1
 fi
 
-codesign --force --sign "$identity" --identifier "$bundle_id" --timestamp=none "$app"
+leaf="$(security find-certificate -c "$identity" -p | openssl x509 -noout -fingerprint -sha1 | awk -F= '{print $2}' | tr -d ':')"
+requirement="designated => identifier \"${bundle_id}\" and certificate leaf = H\"${leaf}\""
+sign_app "$identity" "$requirement"

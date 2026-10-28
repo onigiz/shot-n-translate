@@ -1,7 +1,23 @@
 import AppKit
+import ShotNTranslateCore
 
 @MainActor
 enum ScreenRecordingAccess {
+    /// Removes the stored Screen Recording grant and asks once.
+    /// A grant made for an older copy stays switched on, and macOS then shows
+    /// the system dialog on every capture. That dialog has no Allow button.
+    /// Resetting the grant is what lets the switch apply to this copy.
+    static func resetGrant() {
+        let bundleID = Bundle.main.bundleIdentifier ?? AppReleaseIdentity.bundleIdentifier
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        task.arguments = ["reset", "ScreenCapture", bundleID]
+        try? task.run()
+        task.waitUntilExit()
+        openSettings()
+        CGRequestScreenCaptureAccess()
+    }
+
     static func openSettings() {
         let panes = [
             "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture",
@@ -24,7 +40,7 @@ enum ScreenRecordingAccess {
         }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1 && open -n \"$1\"", "sh", appURL.path]
+        task.arguments = ["-c", "sleep 1.2 && open \"$1\"", "sh", appURL.path]
         try? task.run()
         NSApp.terminate(nil)
     }
