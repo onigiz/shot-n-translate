@@ -36,16 +36,29 @@ public enum TextRecognizer {
         if let live = try? await liveText(in: image) {
             appendCandidate(live, to: &candidates)
         }
-        appendCandidate(recognizeInHorizontalBands(scaledIfWide(image)), to: &candidates)
+        appendCandidate(
+            await visionBandsOffMain(scaledIfWide(image)),
+            to: &candidates
+        )
 
         if shouldInvertForOCR(image), let inverted = invertedImage(image) {
             if let live = try? await liveText(in: inverted) {
                 appendCandidate(live, to: &candidates)
             }
-            appendCandidate(recognizeInHorizontalBands(scaledIfWide(inverted)), to: &candidates)
+            appendCandidate(
+                await visionBandsOffMain(scaledIfWide(inverted)),
+                to: &candidates
+            )
         }
 
         return bestCandidate(candidates) ?? RecognizedText(text: "")
+    }
+
+    /// Vision work is synchronous and can stall. Keep it off the main actor.
+    private static func visionBandsOffMain(_ image: CGImage) async -> RecognizedText {
+        await Task.detached(priority: .userInitiated) {
+            await recognizeInHorizontalBands(image)
+        }.value
     }
 
     @MainActor
@@ -246,7 +259,7 @@ public enum TextRecognizer {
 
     /// Tries the accurate and fast recognizers. One thrown request does not
     /// hide a later pass that can still read the image.
-    private static func recognizeAvailable(in image: CGImage) throws -> RecognizedText? {
+    private static func recognizeAvailable(in image: CGImage) async throws -> RecognizedText? {
         let attempts: [(VNRequestTextRecognitionLevel, [String]?)] = [
             (.accurate, nil),
             (.accurate, fallbackRecognitionLanguages),
@@ -256,7 +269,7 @@ public enum TextRecognizer {
         var lastError: Error?
         for attempt in attempts {
             do {
-                let recognized = try recognizeWithTimeout(
+                let recognized = try await recognizeWithTimeout(
                     in: image,
                     level: attempt.0,
                     recognitionLanguages: attempt.1
@@ -271,7 +284,7 @@ public enum TextRecognizer {
         }
         for variant in [boostedContrast(image), invertedImage(image)].compactMap({ $0 }) {
             do {
-                let recognized = try recognizeWithTimeout(
+                let recognized = try await recognizeWithTimeout(
                     in: variant,
                     level: .accurate,
                     recognitionLanguages: fallbackRecognitionLanguages
@@ -290,51 +303,43 @@ public enum TextRecognizer {
         return nil
     }
 
+    private enum RecognitionTimeout: Error {
+        case timedOut
+    }
+
     /// Accurate recognition can stall while macOS compiles the on-device model.
     /// After the timeout, a fast pass still returns text for this capture.
     private static func recognizeWithTimeout(
         in image: CGImage,
         level: VNRequestTextRecognitionLevel,
         recognitionLanguages: [String]?
-    ) throws -> RecognizedText {
+    ) async throws -> RecognizedText {
         if level != .accurate {
             return try recognize(in: image, level: level, recognitionLanguages: recognitionLanguages)
         }
 
-        final class Box: @unchecked Sendable {
-            var result: Result<RecognizedText, Error>?
-        }
-        let box = Box()
-        let lock = NSLock()
-        let worker = Thread {
-            let outcome = Result {
-                try recognize(in: image, level: level, recognitionLanguages: recognitionLanguages)
+        do {
+            return try await withThrowingTaskGroup(of: RecognizedText.self) { group in
+                group.addTask {
+                    try await Task.detached(priority: .userInitiated) {
+                        try recognize(in: image, level: level, recognitionLanguages: recognitionLanguages)
+                    }.value
+                }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: accurateTimeoutNanoseconds)
+                    throw RecognitionTimeout.timedOut
+                }
+                let first = try await group.next()!
+                group.cancelAll()
+                return first
             }
-            lock.lock()
-            box.result = outcome
-            lock.unlock()
+        } catch is RecognitionTimeout {
+            return try recognize(
+                in: image,
+                level: .fast,
+                recognitionLanguages: recognitionLanguages ?? fallbackRecognitionLanguages
+            )
         }
-        worker.qualityOfService = .userInitiated
-        worker.start()
-
-        let deadline = Date().addingTimeInterval(Double(accurateTimeoutNanoseconds) / 1_000_000_000)
-        while Date() < deadline {
-            lock.lock()
-            let ready = box.result
-            lock.unlock()
-            if let ready {
-                return try ready.get()
-            }
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-
-        lock.lock()
-        let ready = box.result
-        lock.unlock()
-        if let ready {
-            return try ready.get()
-        }
-        return try recognize(in: image, level: .fast, recognitionLanguages: recognitionLanguages ?? fallbackRecognitionLanguages)
     }
 
     /// Retina captures of a wide window are large enough that one Vision request
@@ -347,11 +352,11 @@ public enum TextRecognizer {
         return draw(image, width: maxWidth, height: height) ?? image
     }
 
-    private static func recognizeInHorizontalBands(_ image: CGImage) -> RecognizedText {
+    private static func recognizeInHorizontalBands(_ image: CGImage) async -> RecognizedText {
         let bandHeight = 260
         let overlap = 36
         guard image.height > bandHeight else {
-            return (try? recognizeAvailable(in: image)) ?? RecognizedText(text: "")
+            return (try? await recognizeAvailable(in: image)) ?? RecognizedText(text: "")
         }
         var lines: [String] = []
         var y = 0
@@ -360,7 +365,7 @@ public enum TextRecognizer {
             let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
             let rect = CGRect(x: 0, y: y, width: image.width, height: height).integral.intersection(bounds)
             if rect.width >= 1, rect.height >= 1, let band = image.cropping(to: rect) {
-                let recognized = recognizeBand(band)
+                let recognized = await recognizeBand(band)
                 for line in recognized.text.split(separator: "\n", omittingEmptySubsequences: true) {
                     let text = String(line)
                     if lines.suffix(3).contains(text) {
@@ -377,8 +382,8 @@ public enum TextRecognizer {
         return RecognizedText(text: lines.joined(separator: "\n"))
     }
 
-    private static func recognizeBand(_ image: CGImage) -> RecognizedText {
-        if let recognized = try? recognizeWithTimeout(
+    private static func recognizeBand(_ image: CGImage) async -> RecognizedText {
+        if let recognized = try? await recognizeWithTimeout(
             in: image,
             level: .accurate,
             recognitionLanguages: fallbackRecognitionLanguages
@@ -386,7 +391,7 @@ public enum TextRecognizer {
             return recognized
         }
         for variant in [boostedContrast(image), invertedImage(image)].compactMap({ $0 }) {
-            if let recognized = try? recognizeWithTimeout(
+            if let recognized = try? await recognizeWithTimeout(
                 in: variant,
                 level: .accurate,
                 recognitionLanguages: fallbackRecognitionLanguages
