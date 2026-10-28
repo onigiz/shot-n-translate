@@ -12,8 +12,9 @@ enum ScreenRecordingAccess {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
         task.arguments = ["reset", "ScreenCapture", bundleID]
-        try? task.run()
-        task.waitUntilExit()
+        if (try? task.run()) != nil {
+            task.waitUntilExit()
+        }
         openSettings()
         CGRequestScreenCaptureAccess()
     }
