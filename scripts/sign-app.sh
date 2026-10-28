@@ -15,7 +15,9 @@ sign_app() {
   local requirement="${2:-}"
   xattr -cr "$app" || true
   if [[ -n "$requirement" ]]; then
-    codesign --force --sign "$signing_identity" --identifier "$bundle_id" --timestamp=none -r "$requirement" "$app"
+    # A leading "=" marks literal requirement text. Without it, codesign
+    # treats the string as a file path.
+    codesign --force --sign "$signing_identity" --identifier "$bundle_id" --timestamp=none -r "=${requirement}" "$app"
   else
     codesign --force --sign "$signing_identity" --identifier "$bundle_id" --timestamp=none "$app"
   fi
