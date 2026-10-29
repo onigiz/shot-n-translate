@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import Observation
 import ShotNTranslateCore
+import UniformTypeIdentifiers
 @preconcurrency import Translation
 
 @MainActor
@@ -19,7 +20,16 @@ final class ScreenshotTranslator {
     private(set) var presentation: Presentation = .idle
     private(set) var translationConfiguration: TranslationSession.Configuration?
     private(set) var capturePreview: NSImage?
+    private(set) var saveNotice: L10nKey?
+    private(set) var draft = NSAttributedString()
+    private(set) var draftToken = UUID()
+    private(set) var editorIsDark = false
+    /// Full-resolution capture kept until the preview window closes.
+    private var capturedImage: CGImage?
     private var pendingText: String?
+    private var session = UUID()
+    private var draftWasSeeded = false
+    let editing = TranslationEditingController()
 
     private let settings: TranslationSettings
     private let languageStore: LanguageStore
@@ -27,6 +37,18 @@ final class ScreenshotTranslator {
     init(settings: TranslationSettings, languageStore: LanguageStore) {
         self.settings = settings
         self.languageStore = languageStore
+        editing.onChange = { [weak self] text in
+            self?.draft = text
+        }
+    }
+
+    var canSaveFormattedPDF: Bool {
+        !isTranslating && !draft.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func setEditorSurface(isDark: Bool) {
+        guard editorIsDark != isDark else { return }
+        editorIsDark = isDark
     }
 
     func translateSelection() async {
@@ -37,6 +59,7 @@ final class ScreenshotTranslator {
         let instruction = L10n.string(.dragToSelect, language: languageStore.language)
         let selector = RegionSelector()
         guard let rect = await selector.select(instruction: instruction) else { return }
+        let session = beginSession()
         // The selection shade is full-screen. Capturing before it leaves the
         // compositor produces a black rectangle where the page was.
         do {
@@ -44,10 +67,7 @@ final class ScreenshotTranslator {
         } catch {
             return
         }
-
-        capturePreview = nil
-        pendingText = nil
-        translationConfiguration = nil
+        guard isCurrent(session) else { return }
 
         let prepared: CGImage
         do {
@@ -55,10 +75,12 @@ final class ScreenshotTranslator {
             let captured = try await ScreenRegionCapture.image(forAppKitRect: rect)
             prepared = TextRecognizer.standardImage(captured)
         } catch {
+            guard isCurrent(session) else { return }
             presentation = .failure(ScreenRegionCapture.permissionDenied(error) ? .screenRecordingDenied : .captureFailed)
             TranslationResultWindow.show(translator: self, languageStore: languageStore)
             return
         }
+        guard isCurrent(session) else { return }
 
         showPreview(prepared)
         presentation = .working
@@ -68,14 +90,52 @@ final class ScreenshotTranslator {
         do {
             recognized = try await readableText(in: prepared)
         } catch {
+            guard isCurrent(session) else { return }
             presentation = .failure(.recognitionFailed)
             return
         }
+        guard isCurrent(session) else { return }
         if let recognized {
             presentRecognizedText(recognized)
             return
         }
         presentation = .failure(.noTextFound)
+    }
+
+    /// Drops the in-memory capture. Closing the window does not write a PDF.
+    func releasePreview() {
+        _ = beginSession()
+        presentation = .idle
+    }
+
+    func savePDF() {
+        guard canSaveFormattedPDF, let image = capturedImage else { return }
+        let document = NSAttributedString(attributedString: draft)
+        let darkBackground = editorIsDark
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = L10n.string(.pdfFileName, language: languageStore.language)
+        NSApp.activate()
+        panel.begin { [weak self] response in
+            guard let self else { return }
+            let destination = panel.url
+            Task { @MainActor in
+                guard response == .OK, let destination else { return }
+                do {
+                    try TranslationPreviewPDF.write(
+                        image: image,
+                        document: document,
+                        darkBackground: darkBackground,
+                        to: destination
+                    )
+                    self.saveNotice = .pdfSaved
+                } catch {
+                    self.saveNotice = .pdfSaveFailed
+                }
+            }
+        }
     }
 
     private func readableText(in image: CGImage) async throws -> RecognizedText? {
@@ -84,7 +144,28 @@ final class ScreenshotTranslator {
         return recognized
     }
 
+    private func beginSession() -> UUID {
+        let id = UUID()
+        session = id
+        pendingText = nil
+        translationConfiguration = nil
+        isTranslating = false
+        capturePreview = nil
+        capturedImage = nil
+        saveNotice = nil
+        draft = NSAttributedString()
+        draftToken = UUID()
+        draftWasSeeded = false
+        presentation = .idle
+        return id
+    }
+
+    private func isCurrent(_ id: UUID) -> Bool {
+        session == id
+    }
+
     private func showPreview(_ image: CGImage) {
+        capturedImage = image
         let pixelWidth = CGFloat(max(image.width, 1))
         let pixelHeight = CGFloat(max(image.height, 1))
         let longest = max(pixelWidth, pixelHeight)
@@ -104,7 +185,7 @@ final class ScreenshotTranslator {
             pendingText = nil
             isTranslating = false
             translationConfiguration = nil
-            presentation = .result(CaptureTranslation(
+            showResult(CaptureTranslation(
                 original: text,
                 sourceLanguageCode: code,
                 translatedText: nil,
@@ -115,7 +196,7 @@ final class ScreenshotTranslator {
 
         pendingText = text
         isTranslating = true
-        presentation = .result(CaptureTranslation(
+        showResult(CaptureTranslation(
             original: text,
             sourceLanguageCode: code,
             translatedText: nil,
@@ -159,6 +240,14 @@ final class ScreenshotTranslator {
     private func replaceResult(_ update: (inout CaptureTranslation) -> Void) {
         guard case .result(var result) = presentation else { return }
         update(&result)
+        showResult(result)
+    }
+
+    private func showResult(_ result: CaptureTranslation) {
         presentation = .result(result)
+        guard !draftWasSeeded, let text = result.textForPreview else { return }
+        draft = TranslationInk.plain(text, isDark: editorIsDark)
+        draftToken = UUID()
+        draftWasSeeded = true
     }
 }

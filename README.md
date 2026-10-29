@@ -6,7 +6,7 @@ The source language is detected automatically. The translation target is Turkish
 
 ## Status
 
-The menu bar app, interface languages, translation target, update history, and region translation are in place. A shortcut menu assigns the keyboard shortcuts. PDF export is not built yet.
+The menu bar app, interface languages, translation target, update history, and region translation are in place. A shortcut menu assigns the keyboard shortcuts. The preview keeps the screenshot above an editable translation. Save as PDF writes the image and the edited text. Closing the preview without saving discards it.
 
 ## Platform
 

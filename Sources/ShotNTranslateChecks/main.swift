@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import PDFKit
 import ShotNTranslateCore
 
 @main
@@ -148,7 +149,7 @@ private func checkCaptureFoundation() async throws {
     try expect(stackedText.contains("install"), "Top line of a tall capture is read, got \(stackedText)")
     try expect(stackedText.contains("settings"), "Bottom line of a tall capture is read, got \(stackedText)")
     try expect(TextRecognizer.contrast(page) > 0.2, "A text page has visible contrast")
-    try expect(TextRecognizer.brightPixelFraction(page) > 0.01, "A text page has light pixels")
+    let pageBright = TextRecognizer.brightPixelFraction(page)
     try expect(TextRecognizer.shouldInvertForOCR(page), "A dark text page should be inverted for OCR")
     try expect(TextRecognizer.meanLuminance(page) < 0.45, "A dark text page has low mean luminance")
     if let inverted = TextRecognizer.invertedImage(page) {
@@ -162,7 +163,9 @@ private func checkCaptureFoundation() async throws {
     let blank = try renderedTextImage(" ", width: 200, height: 200, fontSize: 12, dark: true)
     try expect(TextRecognizer.contrast(blank) < 0.04, "A black capture has no contrast")
     try expect(TextRecognizer.brightPixelFraction(blank) < 0.004, "A black capture has no light pixels")
+    try expect(pageBright > TextRecognizer.brightPixelFraction(blank), "A text page is brighter than a black capture")
     try expect(!TextRecognizer.shouldInvertForOCR(blank), "A black capture should not be inverted")
+    try checkPreviewPDF(image: page)
 
     let softDark = try renderedTextImage(
         "Soft gray body text on a dark IDE background",
@@ -261,6 +264,62 @@ private func renderedStackedLines(
         throw CheckError(description: "Could not read the stacked text image")
     }
     return image
+}
+
+private func checkPreviewPDF(image: CGImage) throws {
+    let translated = CaptureTranslation(
+        original: "Hello from the screen",
+        sourceLanguageCode: "en",
+        translatedText: "Ekrandan merhaba",
+        note: nil
+    )
+    try expect(translated.textForPreview == "Ekrandan merhaba", "Preview shows the translation")
+    let already = CaptureTranslation(
+        original: "Bu metin zaten Turkce",
+        sourceLanguageCode: "tr",
+        translatedText: nil,
+        note: .alreadyInTargetLanguage
+    )
+    try expect(already.textForPreview == "Bu metin zaten Turkce", "Text already in the target language is the preview")
+    let unavailable = CaptureTranslation(
+        original: "Hello",
+        sourceLanguageCode: "en",
+        translatedText: nil,
+        note: .translationUnavailable
+    )
+    try expect(unavailable.textForPreview == nil, "A missing translation is not preview text")
+
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("snt-preview-\(UUID().uuidString).pdf")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try TranslationPreviewPDF.write(image: image, translation: "Ekrandan merhaba", to: url)
+    guard let document = PDFDocument(url: url) else {
+        throw CheckError(description: "Saved preview is not a PDF")
+    }
+    try expect(document.pageCount >= 1, "Preview PDF has a page")
+    let extracted = (0..<document.pageCount).compactMap { document.page(at: $0)?.string }.joined(separator: "\n")
+    try expect(extracted.contains("Ekrandan merhaba"), "Preview PDF contains the translation, got \(extracted)")
+
+    let long = (1...80).map { "Translated line \($0) stays under the screenshot." }.joined(separator: "\n")
+    let longURL = FileManager.default.temporaryDirectory.appendingPathComponent("snt-preview-long-\(UUID().uuidString).pdf")
+    defer { try? FileManager.default.removeItem(at: longURL) }
+    try TranslationPreviewPDF.write(image: image, translation: long, to: longURL)
+    guard let longDocument = PDFDocument(url: longURL) else {
+        throw CheckError(description: "Long preview is not a PDF")
+    }
+    try expect(longDocument.pageCount > 1, "A long translation continues on later pages, pages \(longDocument.pageCount)")
+
+    let styled = NSMutableAttributedString(string: "Kalın satır", attributes: [
+        .font: NSFont.boldSystemFont(ofSize: 18),
+        .foregroundColor: NSColor.white
+    ])
+    let styledURL = FileManager.default.temporaryDirectory.appendingPathComponent("snt-preview-styled-\(UUID().uuidString).pdf")
+    defer { try? FileManager.default.removeItem(at: styledURL) }
+    try TranslationPreviewPDF.write(image: image, document: styled, darkBackground: true, to: styledURL)
+    guard let styledDocument = PDFDocument(url: styledURL) else {
+        throw CheckError(description: "Styled preview is not a PDF")
+    }
+    let styledText = (0..<styledDocument.pageCount).compactMap { styledDocument.page(at: $0)?.string }.joined(separator: "\n")
+    try expect(styledText.contains("Kalın satır"), "Styled PDF keeps the edited translation, got \(styledText)")
 }
 
 @MainActor

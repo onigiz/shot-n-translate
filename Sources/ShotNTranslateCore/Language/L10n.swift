@@ -59,6 +59,27 @@ public enum L10nKey: CaseIterable, Sendable {
     case relaunchApp
     case captureFailed
     case recognitionFailed
+    case savePDF
+    case pdfSaved
+    case pdfSaveFailed
+    case pdfFileName
+    case bold
+    case italic
+    case underline
+    case alignLeading
+    case alignCenter
+    case alignTrailing
+    case textColor
+    case largerText
+    case smallerText
+    case editorLight
+    case editorDark
+    case colorBlack
+    case colorWhite
+    case colorRed
+    case colorOrange
+    case colorGreen
+    case colorBlue
 }
 
 public enum L10n {
@@ -188,6 +209,27 @@ public enum L10n {
         case .relaunchApp: "Kapatıp Yeniden Aç"
         case .captureFailed: "Ekran görüntüsü alınamadı."
         case .recognitionFailed: "Yazı okunamadı."
+        case .savePDF: "PDF olarak kaydet"
+        case .pdfSaved: "PDF kaydedildi."
+        case .pdfSaveFailed: "PDF kaydedilemedi."
+        case .pdfFileName: "Ceviri.pdf"
+        case .bold: "Kalın"
+        case .italic: "İtalik"
+        case .underline: "Altı çizili"
+        case .alignLeading: "Sola hizala"
+        case .alignCenter: "Ortala"
+        case .alignTrailing: "Sağa hizala"
+        case .textColor: "Metin rengi"
+        case .largerText: "Yazıyı büyüt"
+        case .smallerText: "Yazıyı küçült"
+        case .editorLight: "Açık zemin"
+        case .editorDark: "Koyu zemin"
+        case .colorBlack: "Siyah"
+        case .colorWhite: "Beyaz"
+        case .colorRed: "Kırmızı"
+        case .colorOrange: "Turuncu"
+        case .colorGreen: "Yeşil"
+        case .colorBlue: "Mavi"
         }
     }
 
@@ -251,6 +293,27 @@ public enum L10n {
         case .relaunchApp: "Quit and Reopen"
         case .captureFailed: "The screenshot could not be captured."
         case .recognitionFailed: "The text could not be read."
+        case .savePDF: "Save as PDF"
+        case .pdfSaved: "The PDF was saved."
+        case .pdfSaveFailed: "The PDF could not be saved."
+        case .pdfFileName: "Translation.pdf"
+        case .bold: "Bold"
+        case .italic: "Italic"
+        case .underline: "Underline"
+        case .alignLeading: "Align left"
+        case .alignCenter: "Center"
+        case .alignTrailing: "Align right"
+        case .textColor: "Text color"
+        case .largerText: "Larger text"
+        case .smallerText: "Smaller text"
+        case .editorLight: "Light background"
+        case .editorDark: "Dark background"
+        case .colorBlack: "Black"
+        case .colorWhite: "White"
+        case .colorRed: "Red"
+        case .colorOrange: "Orange"
+        case .colorGreen: "Green"
+        case .colorBlue: "Blue"
         }
     }
 }

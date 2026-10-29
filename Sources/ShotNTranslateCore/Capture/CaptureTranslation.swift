@@ -23,4 +23,18 @@ public struct CaptureTranslation: Equatable, Sendable {
         self.translatedText = translatedText
         self.note = note
     }
+
+    /// The text shown under the screenshot and written into the PDF.
+    /// A capture already in the target language uses that text as the translation.
+    public var textForPreview: String? {
+        if let translatedText {
+            let cleaned = translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty { return cleaned }
+        }
+        if note == .alreadyInTargetLanguage {
+            let cleaned = original.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty { return cleaned }
+        }
+        return nil
+    }
 }
