@@ -10,6 +10,7 @@ struct ShotNTranslateChecks {
             try checkLocalization()
             try await checkCaptureFoundation()
             try checkImageRegion()
+            try checkTranslationText()
             try await checkPreferences()
             try checkReleases()
             try await checkInstaller()
@@ -418,6 +419,141 @@ private func quadrantImage(width: Int, height: Int) -> CGImage {
     context.setFillColor(NSColor.white.cgColor)
     context.fill(CGRect(x: 0, y: height / 2, width: width / 2, height: height / 2))
     return context.makeImage()!
+}
+
+@MainActor
+private func checkTranslationText() throws {
+    let wrapped = """
+    The weather in the city
+    was very nice today.
+    """
+    try expect(
+        TranslationText.prepare(wrapped) == "The weather in the city was very nice today.",
+        "A wrapped paragraph becomes one sentence"
+    )
+    let twoParagraphs = """
+    First paragraph
+    continues.
+
+    Second paragraph
+    continues.
+    """
+    try expect(
+        TranslationText.prepare(twoParagraphs) == "First paragraph continues.\n\nSecond paragraph continues.",
+        "A blank line keeps two paragraphs"
+    )
+    let list = """
+    Read this introduction
+    carefully.
+    - First item
+    - Second item
+    """
+    let preparedList = TranslationText.prepare(list)
+    try expect(
+        preparedList == "Read this introduction carefully.\n\n- First item\n\n- Second item",
+        "A bullet list stays apart from the prose"
+    )
+    try expect(
+        TranslationText.paragraphs(in: preparedList).count == 3,
+        "Each bullet is its own translation paragraph"
+    )
+    try expect(
+        TranslationText.prepare("The com-\nputer is ready.") == "The computer is ready.",
+        "A hyphen at the end of a line joins the word"
+    )
+    let realParagraphs = """
+    The weather in the city was very
+    nice and people walked by the sea
+    all afternoon.
+    Next paragraph starts with a longer
+    line about the harbor and the boats.
+    """
+    try expect(
+        TranslationText.prepare(realParagraphs) == """
+        The weather in the city was very nice and people walked by the sea all afternoon.
+
+        Next paragraph starts with a longer line about the harbor and the boats.
+        """,
+        "A short sentence ending starts a new paragraph with a blank line"
+    )
+    let fullLine = """
+    The weather in the city was very nice today.
+    People walked by the sea all afternoon and
+    the wind stayed calm until evening.
+    """
+    try expect(
+        !TranslationText.prepare(fullLine).contains("\n\n"),
+        "A full line that ends a sentence stays in the same paragraph"
+    )
+    try expect(
+        TranslationText.prepare(
+            "Languages|AppLanguage.defaultLanguage is the language used until a person chooses one in the menu."
+        ) == """
+        Languages
+
+        AppLanguage.defaultLanguage is the language used until a person chooses one in the menu.
+        """,
+        "A heading glued to the body by a bar is split"
+    )
+    try expect(
+        TranslationText.prepare("Languages\n———\nAppLanguage.defaultLanguage is the language used until a person chooses one.")
+            == """
+        Languages
+
+        AppLanguage.defaultLanguage is the language used until a person chooses one.
+        """,
+        "A heading stays above its paragraph and a rule is dropped"
+    )
+    let laidOut = TextLayout.transcript(from: [
+        TextLineBox(text: "Languages", bounds: CGRect(x: 0.05, y: 0.90, width: 0.16, height: 0.035)),
+        TextLineBox(text: "———", bounds: CGRect(x: 0.05, y: 0.868, width: 0.8, height: 0.004)),
+        TextLineBox(
+            text: "AppLanguage.defaultLanguage is the language used until a person chooses one.",
+            bounds: CGRect(x: 0.05, y: 0.80, width: 0.85, height: 0.02)
+        ),
+        TextLineBox(
+            text: "Both English and Turkish strings live in L10n.",
+            bounds: CGRect(x: 0.05, y: 0.70, width: 0.85, height: 0.02)
+        ),
+        TextLineBox(text: "Translation", bounds: CGRect(x: 0.05, y: 0.60, width: 0.2, height: 0.035))
+    ])
+    try expect(
+        laidOut == """
+        Languages
+
+        AppLanguage.defaultLanguage is the language used until a person chooses one.
+
+        Both English and Turkish strings live in L10n.
+
+        Translation
+        """,
+        "A larger gap and a heading start a new paragraph"
+    )
+    try expect(
+        TranslationText.isPreferred(
+            "Languages\n\nThe menu stores the target language.",
+            over: "Languages The menu stores the target language."
+        ),
+        "A transcript that kept the heading beats a flat copy"
+    )
+    try expect(
+        TranslationText.prepare(TranslationText.prepare(twoParagraphs)) == TranslationText.prepare(twoParagraphs),
+        "Preparing a transcript twice leaves it unchanged"
+    )
+    try expect(
+        TranslationText.isPreferred(
+            "The weather in the city was very nice today.",
+            over: "The weather in the city\nwas very nice today."
+        ),
+        "The same words in a paragraph beat a line-broken copy"
+    )
+    try expect(
+        TranslationText.isPreferred(
+            "One\nTwo\nThree\nFour extra sentence is here today.",
+            over: "One."
+        ),
+        "A much longer transcript still wins"
+    )
 }
 
 @MainActor

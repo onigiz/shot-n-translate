@@ -221,7 +221,11 @@ final class ScreenshotTranslator {
     }
 
     private func presentRecognizedText(_ recognized: RecognizedText) {
-        let text = recognized.text
+        let text = TranslationText.prepare(recognized.text)
+        guard !text.isEmpty else {
+            presentation = .failure(.noTextFound)
+            return
+        }
 
         let detection = LanguageDetector.detect(in: text, visionHints: recognized.visionLanguageCodes)
         let code = detection.code

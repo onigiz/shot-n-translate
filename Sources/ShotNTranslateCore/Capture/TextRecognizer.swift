@@ -213,48 +213,16 @@ public enum TextRecognizer {
         }
         let handler = VNImageRequestHandler(cgImage: image)
         try handler.perform([request])
-        return text(from: request.results ?? [])
+        return RecognizedText(text: TextLayout.transcript(from: lineBoxes(from: request.results ?? [])))
     }
 
-    /// Sorts observations into visual rows, then left-to-right within each row.
-    private static func text(from observations: [VNRecognizedTextObservation]) -> RecognizedText {
-        struct Line {
-            var text: String
-            var box: CGRect
-        }
-
-        let lines = observations.compactMap { observation -> Line? in
+    private static func lineBoxes(from observations: [VNRecognizedTextObservation]) -> [TextLineBox] {
+        observations.compactMap { observation in
             guard let candidate = observation.topCandidates(1).first else { return nil }
             let trimmed = candidate.string.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
-            return Line(text: trimmed, box: observation.boundingBox)
+            return TextLineBox(text: trimmed, bounds: observation.boundingBox)
         }
-        guard !lines.isEmpty else { return RecognizedText(text: "") }
-
-        let ordered = lines.sorted { lhs, rhs in
-            if abs(lhs.box.midY - rhs.box.midY) > 0.02 {
-                return lhs.box.midY > rhs.box.midY
-            }
-            return lhs.box.minX < rhs.box.minX
-        }
-
-        var rows: [[Line]] = []
-        var currentRowMidY: CGFloat?
-        for line in ordered {
-            if let midY = currentRowMidY, abs(line.box.midY - midY) <= 0.03, var row = rows.last {
-                row.append(line)
-                rows[rows.count - 1] = row
-                currentRowMidY = row.reduce(CGFloat(0)) { $0 + $1.box.midY } / CGFloat(row.count)
-            } else {
-                rows.append([line])
-                currentRowMidY = line.box.midY
-            }
-        }
-
-        let joined = rows.map { row in
-            row.sorted { $0.box.minX < $1.box.minX }.map(\.text).joined(separator: " ")
-        }.joined(separator: "\n")
-        return RecognizedText(text: joined)
     }
 
     /// Tries the accurate and fast recognizers. One thrown request does not
@@ -358,20 +326,25 @@ public enum TextRecognizer {
         guard image.height > bandHeight else {
             return (try? await recognizeAvailable(in: image)) ?? RecognizedText(text: "")
         }
-        var lines: [String] = []
+        var lines: [TextLineBox] = []
         var y = 0
+        let imageWidth = CGFloat(image.width)
+        let imageHeight = CGFloat(image.height)
         while y < image.height {
             let height = min(bandHeight, image.height - y)
             let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
             let rect = CGRect(x: 0, y: y, width: image.width, height: height).integral.intersection(bounds)
             if rect.width >= 1, rect.height >= 1, let band = image.cropping(to: rect) {
-                let recognized = await recognizeBand(band)
-                for line in recognized.text.split(separator: "\n", omittingEmptySubsequences: true) {
-                    let text = String(line)
-                    if lines.suffix(3).contains(text) {
-                        continue
-                    }
-                    lines.append(text)
+                for box in await lineBoxesOffMain(in: band) {
+                    lines.append(TextLineBox(
+                        text: box.text,
+                        bounds: TextLayout.globalBounds(
+                            box.bounds,
+                            band: rect,
+                            imageWidth: imageWidth,
+                            imageHeight: imageHeight
+                        )
+                    ))
                 }
             }
             if y + height >= image.height {
@@ -379,28 +352,29 @@ public enum TextRecognizer {
             }
             y += bandHeight - overlap
         }
-        return RecognizedText(text: lines.joined(separator: "\n"))
+        return RecognizedText(text: TextLayout.transcript(from: lines))
     }
 
-    private static func recognizeBand(_ image: CGImage) async -> RecognizedText {
-        if let recognized = try? await recognizeWithTimeout(
-            in: image,
-            level: .accurate,
-            recognitionLanguages: fallbackRecognitionLanguages
-        ), !recognized.text.isEmpty {
-            return recognized
-        }
-        for variant in [boostedContrast(image), invertedImage(image)].compactMap({ $0 }) {
-            if let recognized = try? await recognizeWithTimeout(
-                in: variant,
-                level: .accurate,
-                recognitionLanguages: fallbackRecognitionLanguages
-            ), !recognized.text.isEmpty {
-                return recognized
-            }
-        }
-        return (try? recognize(in: image, level: .fast, recognitionLanguages: fallbackRecognitionLanguages))
-            ?? RecognizedText(text: "")
+    private static func lineBoxesOffMain(in image: CGImage) async -> [TextLineBox] {
+        await Task.detached(priority: .userInitiated) {
+            (try? lineBoxes(in: image, level: .accurate, recognitionLanguages: fallbackRecognitionLanguages)) ?? []
+        }.value
+    }
+
+    private static func lineBoxes(
+        in image: CGImage,
+        level: VNRequestTextRecognitionLevel,
+        recognitionLanguages: [String]?
+    ) throws -> [TextLineBox] {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = level
+        request.usesLanguageCorrection = level == .accurate
+        request.minimumTextHeight = 0.004
+        request.automaticallyDetectsLanguage = false
+        request.recognitionLanguages = recognitionLanguages ?? fallbackRecognitionLanguages
+        let handler = VNImageRequestHandler(cgImage: image)
+        try handler.perform([request])
+        return lineBoxes(from: request.results ?? [])
     }
 
     /// Light gray body text on a near-black page is valid text. Stretching contrast
@@ -438,14 +412,12 @@ public enum TextRecognizer {
         candidates.append(RecognizedText(text: trimmed, visionLanguageCodes: recognized.visionLanguageCodes))
     }
 
+    /// More visual lines are not a better transcript. After paragraph preparation,
+    /// a line-broken copy of the same words loses to the paragraph form.
     private static func bestCandidate(_ candidates: [RecognizedText]) -> RecognizedText? {
-        candidates.max { lhs, rhs in
-            let leftLines = lhs.text.split(separator: "\n", omittingEmptySubsequences: true).count
-            let rightLines = rhs.text.split(separator: "\n", omittingEmptySubsequences: true).count
-            if leftLines != rightLines {
-                return leftLines < rightLines
-            }
-            return lhs.text.count < rhs.text.count
+        candidates.reduce(nil) { best, candidate in
+            guard let best else { return candidate }
+            return TranslationText.isPreferred(candidate.text, over: best.text) ? candidate : best
         }
     }
 }

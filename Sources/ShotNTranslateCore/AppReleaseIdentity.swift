@@ -5,8 +5,8 @@ import Foundation
 public enum AppReleaseIdentity {
     public static let applicationName = "Shot n Translate"
     public static let bundleIdentifier = "com.onigiz.shotntranslate"
-    public static let marketingVersion = "0.3.17"
-    public static let buildNumber = 20
+    public static let marketingVersion = "0.3.18"
+    public static let buildNumber = 21
     public static let githubOwner = "onigiz"
     public static let githubRepository = "shot-n-translate"
     /// Zip attached to a GitHub Release. It must contain `Shot n Translate.app`.

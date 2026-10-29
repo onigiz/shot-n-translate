@@ -122,15 +122,27 @@ struct TranslationResultView: View {
             let text = translator.textWaitingForTranslation()
             guard let text else { return }
             let generation = translator.currentTranslationID
+            let paragraphs = TranslationText.paragraphs(in: TranslationText.prepare(text))
             do {
                 try await session.prepareTranslation()
-                let response = try await session.translate(text)
-                let sourceCode = response.sourceLanguage.languageCode?.identifier
-                    ?? response.sourceLanguage.maximalIdentifier
+                var pieces: [String] = []
+                var sourceCode: String?
+                for paragraph in paragraphs {
+                    let response = try await session.translate(paragraph)
+                    if sourceCode == nil {
+                        sourceCode = response.sourceLanguage.languageCode?.identifier
+                            ?? response.sourceLanguage.maximalIdentifier
+                    }
+                    let translated = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !translated.isEmpty {
+                        pieces.append(translated)
+                    }
+                }
+                let joined = pieces.joined(separator: "\n\n")
                 translator.finishTranslation(
                     of: text,
                     generation: generation,
-                    translated: response.targetText,
+                    translated: joined.isEmpty ? nil : joined,
                     detectedSourceCode: sourceCode
                 )
             } catch {
