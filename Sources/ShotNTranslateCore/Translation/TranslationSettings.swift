@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// Where recognized text is translated.
-/// The source language is always detected from the text. There is no manual source picker.
+/// The source language is detected from the text. The preview can correct that source.
 public enum TranslationTarget: String, CaseIterable, Identifiable, Sendable {
     case turkish = "tr"
     case english = "en"

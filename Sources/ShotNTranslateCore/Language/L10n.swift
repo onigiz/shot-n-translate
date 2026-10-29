@@ -5,6 +5,7 @@ public enum L10nKey: CaseIterable, Sendable {
     case targetTurkish
     case targetEnglish
     case sourceDetectedAutomatically
+    case sourceLanguage
     case appLanguage
     case languageOptionTurkish
     case languageOptionEnglish
@@ -155,6 +156,7 @@ public enum L10n {
         case .targetTurkish: "Türkçe"
         case .targetEnglish: "İngilizce"
         case .sourceDetectedAutomatically: "Kaynak dil otomatik tespit edilir"
+        case .sourceLanguage: "Kaynak dil"
         case .appLanguage: "Uygulama dili"
         case .languageOptionTurkish: "Türkçe"
         case .languageOptionEnglish: "English"
@@ -239,6 +241,7 @@ public enum L10n {
         case .targetTurkish: "Turkish"
         case .targetEnglish: "English"
         case .sourceDetectedAutomatically: "Source language is detected automatically"
+        case .sourceLanguage: "Source language"
         case .appLanguage: "App language"
         case .languageOptionTurkish: "Türkçe"
         case .languageOptionEnglish: "English"

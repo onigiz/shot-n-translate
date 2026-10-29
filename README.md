@@ -2,7 +2,7 @@
 
 macOS app that takes a screenshot, detects any text in the image, translates that text, and saves both the original content and the translation in a PDF.
 
-The source language is detected automatically. The translation target is Turkish or English. The app interface is Turkish by default and can switch to English immediately.
+The source language is detected automatically. The preview can correct that source and translate again. The translation target is Turkish or English. The app interface is Turkish by default and can switch to English immediately.
 
 ## Status
 
@@ -20,7 +20,7 @@ Both English and Turkish strings live in `L10n`. Adding a string means adding it
 
 ## Translation
 
-The menu stores the target language in `TranslationSettings.target`. Recognized text will be translated into that language. The user does not pick a source language.
+The menu stores the target language in `TranslationSettings.target`. Recognized text will be translated into that language. The preview menu can correct the detected source.
 
 ## Updates
 

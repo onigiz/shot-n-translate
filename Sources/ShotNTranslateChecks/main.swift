@@ -112,6 +112,28 @@ private func checkCaptureFoundation() async throws {
         LanguageDetector.detectCode(in: "??? ###", visionHints: ["de"]) == "de",
         "Vision language hints are used when text has no script signal"
     )
+    try expect(
+        !LanguageDetector.detect(in: "??? ###", visionHints: ["de"]).isConfident,
+        "A vision hint alone is not passed to Translation"
+    )
+    let englishWithKana = "Hello, the weather in the city is very nice and the sea was calm today.\u{3042}"
+    try expect(
+        LanguageDetector.detectCode(in: englishWithKana) == "en",
+        "One kana character does not make English text Japanese"
+    )
+    try expect(
+        LanguageDetector.detect(in: englishWithKana).isConfident,
+        "Mostly Latin text keeps a confident English source"
+    )
+    try expect(
+        LanguageDetector.detectCode(in: "これはテストです。今日はいい天気。") == "ja",
+        "Japanese text with kana is still Japanese"
+    )
+    try expect(
+        LanguageDetector.detectCode(in: "你好世界") == "zh",
+        "Han text without kana is Chinese"
+    )
+    try expect(LanguageDetector.detectCode(in: "\u{3042}") != "ja", "A single kana character is not Japanese")
     try expect(LanguageDetector.matches("en-US", target: .english), "Regional English matches the English target")
     try expect(!LanguageDetector.matches("tr", target: .english), "Turkish does not match the English target")
 

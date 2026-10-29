@@ -28,6 +28,9 @@ final class ScreenshotTranslator {
     private var capturedImage: CGImage?
     private var pendingText: String?
     private var session = UUID()
+    private var translationID = UUID()
+
+    var currentTranslationID: UUID { translationID }
     private var draftWasSeeded = false
     let editing = TranslationEditingController()
 
@@ -156,6 +159,7 @@ final class ScreenshotTranslator {
         draft = NSAttributedString()
         draftToken = UUID()
         draftWasSeeded = false
+        translationID = UUID()
         presentation = .idle
         return id
     }
@@ -179,15 +183,41 @@ final class ScreenshotTranslator {
     private func presentRecognizedText(_ recognized: RecognizedText) {
         let text = recognized.text
 
-        let code = LanguageDetector.detectCode(in: text, visionHints: recognized.visionLanguageCodes)
+        let detection = LanguageDetector.detect(in: text, visionHints: recognized.visionLanguageCodes)
+        let code = detection.code
+        let source = detection.isConfident ? code : nil
+        startTranslation(of: text, source: source)
+    }
 
-        if let code, LanguageDetector.matches(code, target: settings.target) {
+    /// Translates again after the preview corrects the source language.
+    func useSource(_ code: String) {
+        guard case .result(let result) = presentation else { return }
+        let base = LanguageDetector.baseCode(code)
+        guard !base.isEmpty else { return }
+        startTranslation(of: result.original, source: base)
+    }
+
+    func sourceChoices(selected: String?) -> [String] {
+        var codes = LanguageDetector.correctionCodes
+        if let selected {
+            let base = LanguageDetector.baseCode(selected)
+            if !base.isEmpty, !codes.contains(base) {
+                codes.insert(base, at: 0)
+            }
+        }
+        return codes
+    }
+
+    private func startTranslation(of text: String, source: String?) {
+        draftWasSeeded = false
+        translationID = UUID()
+        if let source, LanguageDetector.matches(source, target: settings.target) {
             pendingText = nil
             isTranslating = false
             translationConfiguration = nil
             showResult(CaptureTranslation(
                 original: text,
-                sourceLanguageCode: code,
+                sourceLanguageCode: source,
                 translatedText: nil,
                 note: .alreadyInTargetLanguage
             ))
@@ -198,13 +228,12 @@ final class ScreenshotTranslator {
         isTranslating = true
         showResult(CaptureTranslation(
             original: text,
-            sourceLanguageCode: code,
+            sourceLanguageCode: source,
             translatedText: nil,
-            note: code == nil ? .languageNotDetected : nil
+            note: source == nil ? .languageNotDetected : nil
         ))
-        // Nil source lets Translation detect the language when OCR + NL disagree or stay undecided.
         var configuration = TranslationSession.Configuration(
-            source: code.map { Locale.Language(identifier: $0) },
+            source: source.map { Locale.Language(identifier: $0) },
             target: Locale.Language(identifier: settings.target.rawValue)
         )
         configuration.invalidate()
@@ -215,8 +244,13 @@ final class ScreenshotTranslator {
         pendingText
     }
 
-    func finishTranslation(of text: String, translated: String?, detectedSourceCode: String?) {
-        guard pendingText == text else { return }
+    func finishTranslation(
+        of text: String,
+        generation: UUID,
+        translated: String?,
+        detectedSourceCode: String?
+    ) {
+        guard translationID == generation, pendingText == text else { return }
         replaceResult { result in
             if let detectedSourceCode, result.sourceLanguageCode == nil {
                 let base = LanguageDetector.baseCode(detectedSourceCode)

@@ -116,6 +116,7 @@ struct TranslationResultView: View {
         .translationTask(translator.translationConfiguration) { session in
             let text = translator.textWaitingForTranslation()
             guard let text else { return }
+            let generation = translator.currentTranslationID
             do {
                 try await session.prepareTranslation()
                 let response = try await session.translate(text)
@@ -123,11 +124,17 @@ struct TranslationResultView: View {
                     ?? response.sourceLanguage.maximalIdentifier
                 translator.finishTranslation(
                     of: text,
+                    generation: generation,
                     translated: response.targetText,
                     detectedSourceCode: sourceCode
                 )
             } catch {
-                translator.finishTranslation(of: text, translated: nil, detectedSourceCode: nil)
+                translator.finishTranslation(
+                    of: text,
+                    generation: generation,
+                    translated: nil,
+                    detectedSourceCode: nil
+                )
             }
         }
     }
@@ -141,6 +148,7 @@ struct TranslationResultView: View {
                     .frame(maxWidth: .infinity, maxHeight: 240)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
+            sourceMenu(result: result, language: language)
             if translator.isTranslating {
                 ProgressView(L10n.string(.translating, language: language))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -276,6 +284,38 @@ struct TranslationResultView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func sourceMenu(result: CaptureTranslation, language: AppLanguage) -> some View {
+        let selected = result.sourceLanguageCode.map(LanguageDetector.baseCode)
+        return HStack(spacing: 8) {
+            Text(L10n.string(.sourceLanguage, language: language))
+                .foregroundStyle(.secondary)
+            Menu {
+                ForEach(translator.sourceChoices(selected: selected), id: \.self) { code in
+                    Button {
+                        translator.useSource(code)
+                    } label: {
+                        if code == selected {
+                            Label(languageName(code, ui: language), systemImage: "checkmark")
+                        } else {
+                            Text(languageName(code, ui: language))
+                        }
+                    }
+                }
+            } label: {
+                Text(selected.map { languageName($0, ui: language) } ?? L10n.string(.sourceDetectedAutomatically, language: language))
+            }
+            .fixedSize()
+            Spacer()
+        }
+    }
+
+    private func languageName(_ code: String, ui: AppLanguage) -> String {
+        let locale = Locale(identifier: ui.rawValue)
+        return locale.localizedString(forLanguageCode: code)
+            ?? locale.localizedString(forIdentifier: code)
+            ?? code
     }
 
     private func noteKey(_ note: CaptureTranslation.Note) -> L10nKey {
