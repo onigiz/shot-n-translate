@@ -8,6 +8,10 @@ enum TranslationResultWindow {
     private static var window: NSWindow?
     private static let closeDelegate = PreviewWindowDelegate()
 
+    static func hideWithoutReleasing() {
+        window?.orderOut(nil)
+    }
+
     static func show(translator: ScreenshotTranslator, languageStore: LanguageStore) {
         if window == nil {
             let controller = NSHostingController(rootView: TranslationResultView()
@@ -68,6 +72,7 @@ struct TranslationResultView: View {
                                 .scaledToFit()
                                 .frame(maxWidth: .infinity, maxHeight: 280)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                            chooseRegionButton(language: language)
                         }
                         if key == .screenRecordingDenied {
                             Image(systemName: "exclamationmark.triangle")
@@ -148,6 +153,7 @@ struct TranslationResultView: View {
                     .frame(maxWidth: .infinity, maxHeight: 240)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
+            chooseRegionButton(language: language)
             sourceMenu(result: result, language: language)
             if translator.isTranslating {
                 ProgressView(L10n.string(.translating, language: language))
@@ -284,6 +290,13 @@ struct TranslationResultView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func chooseRegionButton(language: AppLanguage) -> some View {
+        Button(L10n.string(.selectTranslationArea, language: language)) {
+            Task { await translator.retranslateSelectedRegion() }
+        }
+        .disabled(translator.isBusy || translator.isTranslating || translator.capturePreview == nil)
     }
 
     private func sourceMenu(result: CaptureTranslation, language: AppLanguage) -> some View {

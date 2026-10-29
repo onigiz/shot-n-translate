@@ -62,6 +62,7 @@ final class ScreenshotTranslator {
         let instruction = L10n.string(.dragToSelect, language: languageStore.language)
         let selector = RegionSelector()
         guard let rect = await selector.select(instruction: instruction) else { return }
+        TranslationResultWindow.hideWithoutReleasing()
         let session = beginSession()
         // The selection shade is full-screen. Capturing before it leaves the
         // compositor produces a black rectangle where the page was.
@@ -86,12 +87,51 @@ final class ScreenshotTranslator {
         guard isCurrent(session) else { return }
 
         showPreview(prepared)
+        let region: CGRect
+        if settings.scope == .regionFirst {
+            guard let chosen = await chooseRegion(on: prepared) else {
+                guard isCurrent(session) else { return }
+                releasePreview()
+                return
+            }
+            guard isCurrent(session) else { return }
+            region = chosen
+        } else {
+            region = ImageRegionGeometry.fullRect(width: prepared.width, height: prepared.height)
+        }
+        await recognizeAndPresent(fullImage: prepared, region: region, session: session)
+    }
+
+    /// Reads a region of the current screenshot again and replaces the editor text.
+    /// The stored screenshot stays whole.
+    func retranslateSelectedRegion() async {
+        guard !isBusy, !isTranslating, let image = capturedImage else { return }
+        isBusy = true
+        defer { isBusy = false }
+        let session = self.session
+        guard let region = await chooseRegion(on: image) else { return }
+        guard isCurrent(session), capturedImage != nil else { return }
+        await recognizeAndPresent(fullImage: image, region: region, session: session)
+    }
+
+    private func chooseRegion(on image: CGImage) async -> CGRect? {
+        let language = languageStore.language
+        return await ImageRegionPicker(image: image).select(
+            instruction: L10n.string(.dragTranslationArea, language: language),
+            confirmTitle: L10n.string(.translateSelectedArea, language: language),
+            cancelTitle: L10n.string(.cancel, language: language),
+            windowTitle: L10n.string(.translationAreaTitle, language: language)
+        )
+    }
+
+    private func recognizeAndPresent(fullImage: CGImage, region: CGRect, session: UUID) async {
+        guard isCurrent(session) else { return }
         presentation = .working
         TranslationResultWindow.show(translator: self, languageStore: languageStore)
-
+        let recognitionSource = ImageRegionCrop.recognitionImage(from: fullImage, pixelRect: region)
         let recognized: RecognizedText?
         do {
-            recognized = try await readableText(in: prepared)
+            recognized = try await readableText(in: recognitionSource)
         } catch {
             guard isCurrent(session) else { return }
             presentation = .failure(.recognitionFailed)

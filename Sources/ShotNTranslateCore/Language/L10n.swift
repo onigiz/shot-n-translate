@@ -6,6 +6,14 @@ public enum L10nKey: CaseIterable, Sendable {
     case targetEnglish
     case sourceDetectedAutomatically
     case sourceLanguage
+    case translationArea
+    case translateImmediately
+    case selectRegionFirst
+    case selectEntireImageShortcut
+    case selectTranslationArea
+    case dragTranslationArea
+    case translateSelectedArea
+    case translationAreaTitle
     case appLanguage
     case languageOptionTurkish
     case languageOptionEnglish
@@ -157,6 +165,14 @@ public enum L10n {
         case .targetEnglish: "İngilizce"
         case .sourceDetectedAutomatically: "Kaynak dil otomatik tespit edilir"
         case .sourceLanguage: "Kaynak dil"
+        case .translationArea: "Çeviri alanı"
+        case .translateImmediately: "Doğrudan çevir"
+        case .selectRegionFirst: "Önce bölge seç"
+        case .selectEntireImageShortcut: "Bölge seçerken ⌘A tüm görseli seçer"
+        case .selectTranslationArea: "Çevrilecek bölgeyi seç"
+        case .dragTranslationArea: "Çevrilecek alanı sürükleyin. Tüm görsel için ⌘A. Vazgeçmek için Esc."
+        case .translateSelectedArea: "Seçilen alanı çevir"
+        case .translationAreaTitle: "Çevrilecek alan"
         case .appLanguage: "Uygulama dili"
         case .languageOptionTurkish: "Türkçe"
         case .languageOptionEnglish: "English"
@@ -242,6 +258,14 @@ public enum L10n {
         case .targetEnglish: "English"
         case .sourceDetectedAutomatically: "Source language is detected automatically"
         case .sourceLanguage: "Source language"
+        case .translationArea: "Translation area"
+        case .translateImmediately: "Translate immediately"
+        case .selectRegionFirst: "Select a region first"
+        case .selectEntireImageShortcut: "While selecting a region, ⌘A selects the whole image"
+        case .selectTranslationArea: "Select area to translate"
+        case .dragTranslationArea: "Drag the area to translate. Press ⌘A for the whole image. Press Esc to cancel."
+        case .translateSelectedArea: "Translate selected area"
+        case .translationAreaTitle: "Area to translate"
         case .appLanguage: "App language"
         case .languageOptionTurkish: "Türkçe"
         case .languageOptionEnglish: "English"

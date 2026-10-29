@@ -9,6 +9,7 @@ struct ShotNTranslateChecks {
         do {
             try checkLocalization()
             try await checkCaptureFoundation()
+            try checkImageRegion()
             try await checkPreferences()
             try checkReleases()
             try await checkInstaller()
@@ -345,6 +346,81 @@ private func checkPreviewPDF(image: CGImage) throws {
 }
 
 @MainActor
+private func checkImageRegion() throws {
+    let frame = ImageRegionGeometry.displayFrame(
+        imageWidth: 400,
+        imageHeight: 200,
+        in: CGSize(width: 220, height: 140)
+    )
+    try expect(abs(frame.width - 220) < 0.1, "Image fits the view width")
+    try expect(abs(frame.height - 110) < 0.1, "Image keeps its aspect in the view")
+    let leftHalf = CGRect(x: frame.minX, y: frame.minY, width: frame.width / 2, height: frame.height)
+    let pixels = ImageRegionGeometry.pixelRect(
+        selection: leftHalf,
+        displayFrame: frame,
+        imageWidth: 400,
+        imageHeight: 200
+    )
+    try expect(pixels == CGRect(x: 0, y: 0, width: 200, height: 200), "Left half maps to left image pixels")
+    let roundTrip = ImageRegionGeometry.viewRect(
+        pixelRect: pixels ?? .zero,
+        displayFrame: frame,
+        imageWidth: 400,
+        imageHeight: 200
+    )
+    try expect(abs(roundTrip.minX - leftHalf.minX) < 1, "Pixel selection maps back onto the view")
+    try expect(
+        ImageRegionGeometry.pixelRect(
+            selection: CGRect(x: frame.minX, y: frame.minY, width: 1.2, height: 1.2),
+            displayFrame: frame,
+            imageWidth: 400,
+            imageHeight: 200
+        ) == nil,
+        "A tiny drag is not a translation region"
+    )
+    try expect(
+        ImageRegionGeometry.fullRect(width: 400, height: 200) == CGRect(x: 0, y: 0, width: 400, height: 200),
+        "Command-A uses the whole screenshot"
+    )
+
+    let source = quadrantImage(width: 40, height: 20)
+    let topLeft = ImageRegionCrop.recognitionImage(
+        from: source,
+        pixelRect: CGRect(x: 0, y: 0, width: 20, height: 10)
+    )
+    let bottomRight = ImageRegionCrop.recognitionImage(
+        from: source,
+        pixelRect: CGRect(x: 20, y: 10, width: 20, height: 10)
+    )
+    try expect(source.width == 40 && source.height == 20, "Choosing a region does not crop the screenshot")
+    try expect(topLeft.width == 20 && topLeft.height == 10, "Recognition uses only the selected pixels")
+    try expect(TextRecognizer.meanLuminance(topLeft) > 0.8, "The top-left of the screenshot stays the top-left")
+    try expect(TextRecognizer.meanLuminance(bottomRight) < 0.1, "The bottom-right of the screenshot stays dark")
+    let whole = ImageRegionCrop.recognitionImage(
+        from: source,
+        pixelRect: ImageRegionGeometry.fullRect(width: source.width, height: source.height)
+    )
+    try expect(whole.width == source.width && whole.height == source.height, "The whole image is read unchanged")
+}
+
+private func quadrantImage(width: Int, height: Int) -> CGImage {
+    let context = CGContext(
+        data: nil,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    context.setFillColor(NSColor.black.cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    context.setFillColor(NSColor.white.cgColor)
+    context.fill(CGRect(x: 0, y: height / 2, width: width / 2, height: height / 2))
+    return context.makeImage()!
+}
+
+@MainActor
 private func checkPreferences() async throws {
     let languageDefaults = makeDefaults()
     let languageStore = LanguageStore(defaults: languageDefaults)
@@ -370,6 +446,13 @@ private func checkPreferences() async throws {
     try expect(settings.target == .turkish, "Unset translation target")
     settings.target = .english
     try expect(TranslationSettings(defaults: targetDefaults).target == .english, "Persisted translation target")
+    try expect(TranslationScope.defaultScope == .immediate, "Default translation scope")
+    try expect(settings.scope == .immediate, "Unset translation scope")
+    settings.scope = .regionFirst
+    try expect(TranslationSettings(defaults: targetDefaults).scope == .regionFirst, "Persisted translation scope")
+    let unknownScope = makeDefaults()
+    unknownScope.set("nope", forKey: TranslationSettings.scopeStorageKey)
+    try expect(TranslationSettings(defaults: unknownScope).scope == .immediate, "Unknown translation scope")
 }
 
 private func checkReleases() throws {

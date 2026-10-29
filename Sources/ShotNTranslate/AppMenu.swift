@@ -60,6 +60,15 @@ struct AppMenu: View {
 
         Divider()
 
+        Section(L10n.string(.translationArea, language: language)) {
+            scopeToggle(.immediate, title: L10n.string(.translateImmediately, language: language), language: language)
+            scopeToggle(.regionFirst, title: L10n.string(.selectRegionFirst, language: language), language: language)
+        }
+        Button(L10n.string(.selectEntireImageShortcut, language: language)) {}
+            .disabled(true)
+
+        Divider()
+
         Section(L10n.string(.appLanguage, language: language)) {
             languageToggle(.turkish, title: L10n.string(.languageOptionTurkish, language: language))
             languageToggle(.english, title: L10n.string(.languageOptionEnglish, language: language))
@@ -123,6 +132,19 @@ struct AppMenu: View {
         }
         .accessibilityLabel(title)
         .id("\(language.rawValue)-\(target.rawValue)")
+    }
+
+    private func scopeToggle(_ scope: TranslationScope, title: String, language: AppLanguage) -> some View {
+        Toggle(isOn: Binding(
+            get: { translationSettings.scope == scope },
+            set: { isOn in
+                if isOn { translationSettings.scope = scope }
+            }
+        )) {
+            Text(title)
+        }
+        .accessibilityLabel(title)
+        .id("\(language.rawValue)-scope-\(scope.rawValue)")
     }
 
     private func languageToggle(_ choice: AppLanguage, title: String) -> some View {

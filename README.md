@@ -2,11 +2,11 @@
 
 macOS app that takes a screenshot, detects any text in the image, translates that text, and saves both the original content and the translation in a PDF.
 
-The source language is detected automatically. The preview can correct that source and translate again. The translation target is Turkish or English. The app interface is Turkish by default and can switch to English immediately.
+The source language is detected automatically. The preview can correct that source and translate again. The translation target is Turkish or English. The menu can translate the whole screenshot immediately, or ask for a region of that screenshot first. The screenshot stays whole either way. The app interface is Turkish by default and can switch to English immediately.
 
 ## Status
 
-The menu bar app, interface languages, translation target, update history, and region translation are in place. A shortcut menu assigns the keyboard shortcuts. The preview keeps the screenshot above an editable translation. Save as PDF writes the image and the edited text. Closing the preview without saving discards it.
+The menu bar app, interface languages, translation target, update history, and region translation are in place. A shortcut menu assigns the keyboard shortcuts. The preview keeps the whole screenshot above an editable translation. The user can limit translation to a dragged area of that screenshot; Command-A during that choice uses the whole image. Save as PDF writes the image and the edited text. Closing the preview without saving discards it.
 
 ## Platform
 
@@ -20,7 +20,7 @@ Both English and Turkish strings live in `L10n`. Adding a string means adding it
 
 ## Translation
 
-The menu stores the target language in `TranslationSettings.target`. Recognized text will be translated into that language. The preview menu can correct the detected source.
+The menu stores the target language in `TranslationSettings.target`. Recognized text will be translated into that language. The preview menu can correct the detected source. `TranslationSettings.scope` chooses whether translation starts on the whole screenshot or after the user drags a region. The preview can select that region again and replace the editor text. The stored screenshot is not cropped.
 
 ## Updates
 
