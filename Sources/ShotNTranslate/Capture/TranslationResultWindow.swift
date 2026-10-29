@@ -121,29 +121,28 @@ struct TranslationResultView: View {
         .translationTask(translator.translationConfiguration) { session in
             let text = translator.textWaitingForTranslation()
             guard let text else { return }
+            InstalledTranslation.track(session)
+            defer { InstalledTranslation.release(session) }
             let generation = translator.currentTranslationID
             let paragraphs = TranslationText.paragraphs(in: TranslationText.prepare(text))
-            do {
-                try await session.prepareTranslation()
-                var pieces: [String] = []
-                var sourceCode: String?
-                for paragraph in paragraphs {
-                    let response = try await session.translate(paragraph)
-                    if sourceCode == nil {
-                        sourceCode = response.sourceLanguage.languageCode?.identifier
-                            ?? response.sourceLanguage.maximalIdentifier
-                    }
-                    let translated = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !translated.isEmpty {
-                        pieces.append(translated)
-                    }
-                }
-                let joined = pieces.joined(separator: "\n\n")
+                .map { LanguageDetector.textForTranslation($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            guard !paragraphs.isEmpty else {
                 translator.finishTranslation(
                     of: text,
                     generation: generation,
-                    translated: joined.isEmpty ? nil : joined,
-                    detectedSourceCode: sourceCode
+                    translated: nil,
+                    detectedSourceCode: nil
+                )
+                return
+            }
+            do {
+                let outcome = try await translationOutcome(session: session, paragraphs: paragraphs)
+                translator.finishTranslation(
+                    of: text,
+                    generation: generation,
+                    translated: outcome.text.isEmpty ? nil : outcome.text,
+                    detectedSourceCode: outcome.sourceCode
                 )
             } catch {
                 translator.finishTranslation(
@@ -351,4 +350,47 @@ struct TranslationResultView: View {
         }
     }
 
+}
+
+private struct TranslationOutcome: Sendable {
+    var text: String
+    var sourceCode: String?
+}
+
+private enum TranslationWait: Error {
+    case timedOut
+}
+
+/// Apple Translation can wait forever on a language download that a menu-bar app never shows.
+/// Stop that wait so the preview does not stay on Translating.
+private func translationOutcome(
+    session: TranslationSession,
+    paragraphs: [String]
+) async throws -> TranslationOutcome {
+    try await withThrowingTaskGroup(of: TranslationOutcome.self) { group in
+        group.addTask {
+            try await session.prepareTranslation()
+            var pieces: [String] = []
+            var sourceCode: String?
+            for paragraph in paragraphs {
+                let response = try await session.translate(paragraph)
+                if sourceCode == nil {
+                    sourceCode = response.sourceLanguage.languageCode?.identifier
+                        ?? response.sourceLanguage.maximalIdentifier
+                }
+                let translated = response.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !translated.isEmpty {
+                    pieces.append(translated)
+                }
+            }
+            return TranslationOutcome(text: pieces.joined(separator: "\n\n"), sourceCode: sourceCode)
+        }
+        group.addTask {
+            try await Task.sleep(nanoseconds: 20_000_000_000)
+            throw TranslationWait.timedOut
+        }
+        let outcome = try await group.next()!
+        group.cancelAll()
+        return outcome
+    }
 }

@@ -29,6 +29,11 @@ final class ScreenshotTranslator {
     private var pendingText: String?
     private var session = UUID()
     private var translationID = UUID()
+    private var translationWork: Task<Void, Never>?
+    private var translationWatchdog: Task<Void, Never>?
+    /// Menu-bar apps do not present the system language download. Raise the
+    /// app only while that download can still be requested.
+    private var activationRaisedForDownload = false
 
     var currentTranslationID: UUID { translationID }
     private var draftWasSeeded = false
@@ -190,6 +195,8 @@ final class ScreenshotTranslator {
     private func beginSession() -> UUID {
         let id = UUID()
         session = id
+        cancelTranslationWait()
+        restoreMenuBarActivation()
         pendingText = nil
         translationConfiguration = nil
         isTranslating = false
@@ -254,11 +261,12 @@ final class ScreenshotTranslator {
 
     private func startTranslation(of text: String, source: String?) {
         draftWasSeeded = false
+        cancelTranslationWait()
         translationID = UUID()
+        translationConfiguration = nil
         if let source, LanguageDetector.matches(source, target: settings.target) {
             pendingText = nil
             isTranslating = false
-            translationConfiguration = nil
             showResult(CaptureTranslation(
                 original: text,
                 sourceLanguageCode: source,
@@ -276,12 +284,73 @@ final class ScreenshotTranslator {
             translatedText: nil,
             note: source == nil ? .languageNotDetected : nil
         ))
-        var configuration = TranslationSession.Configuration(
-            source: source.map { Locale.Language(identifier: $0) },
-            target: Locale.Language(identifier: settings.target.rawValue)
-        )
-        configuration.invalidate()
-        translationConfiguration = configuration
+        let generation = translationID
+        let targetCode = settings.target.rawValue
+        translationWork = Task { @MainActor in
+            let paragraphs = Self.paragraphsReady(for: text)
+            guard !paragraphs.isEmpty else {
+                finishTranslation(of: text, generation: generation, translated: nil, detectedSourceCode: nil)
+                return
+            }
+            if let source, await InstalledTranslation.isInstalled(source: source, target: targetCode) {
+                let outcome = await InstalledTranslation.translate(
+                    paragraphs: paragraphs,
+                    sourceCode: source,
+                    targetCode: targetCode
+                )
+                guard !Task.isCancelled else { return }
+                finishTranslation(
+                    of: text,
+                    generation: generation,
+                    translated: outcome?.text,
+                    detectedSourceCode: outcome?.sourceCode
+                )
+                return
+            }
+            guard !Task.isCancelled else { return }
+            allowTranslationDownloadPrompt()
+            var configuration = TranslationSession.Configuration(
+                source: source.map { Locale.Language(identifier: $0) },
+                target: Locale.Language(identifier: targetCode)
+            )
+            configuration.invalidate()
+            translationConfiguration = configuration
+        }
+        translationWatchdog = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: InstalledTranslation.answerLimit)
+            guard !Task.isCancelled else { return }
+            InstalledTranslation.cancelActive()
+            finishTranslation(of: text, generation: generation, translated: nil, detectedSourceCode: nil)
+        }
+    }
+
+    private static func paragraphsReady(for text: String) -> [String] {
+        TranslationText.paragraphs(in: TranslationText.prepare(text))
+            .map { LanguageDetector.textForTranslation($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func cancelTranslationWait() {
+        translationWork?.cancel()
+        translationWork = nil
+        translationWatchdog?.cancel()
+        translationWatchdog = nil
+        InstalledTranslation.cancelActive()
+    }
+
+    /// A menu-bar app cannot show the system language sheet. Become a normal
+    /// app only until that request finishes, then return to the menu bar.
+    private func allowTranslationDownloadPrompt() {
+        guard !activationRaisedForDownload else { return }
+        activationRaisedForDownload = true
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate()
+    }
+
+    private func restoreMenuBarActivation() {
+        guard activationRaisedForDownload else { return }
+        activationRaisedForDownload = false
+        NSApp.setActivationPolicy(.accessory)
     }
 
     func textWaitingForTranslation() -> String? {
@@ -295,6 +364,9 @@ final class ScreenshotTranslator {
         detectedSourceCode: String?
     ) {
         guard translationID == generation, pendingText == text else { return }
+        cancelTranslationWait()
+        restoreMenuBarActivation()
+        pendingText = nil
         replaceResult { result in
             if let detectedSourceCode, result.sourceLanguageCode == nil {
                 let base = LanguageDetector.baseCode(detectedSourceCode)

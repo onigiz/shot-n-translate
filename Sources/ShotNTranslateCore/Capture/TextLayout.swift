@@ -5,10 +5,13 @@ import Foundation
 public struct TextLineBox: Equatable, Sendable {
     public var text: String
     public var bounds: CGRect
+    /// Vision's confidence for this line, from 0 to 1. Layout-only boxes use 1.
+    public var confidence: Float
 
-    public init(text: String, bounds: CGRect) {
+    public init(text: String, bounds: CGRect, confidence: Float = 1) {
         self.text = text
         self.bounds = bounds
+        self.confidence = confidence
     }
 }
 

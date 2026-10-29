@@ -24,38 +24,63 @@ public enum TextRecognizer {
     /// How long an accurate Vision pass may block before a fast pass is tried.
     private static let accurateTimeoutNanoseconds: UInt64 = 12_000_000_000
 
+    /// Sideways lines below this confidence are not mixed into an upright transcript.
+    private static let sidewaysConfidence: Float = 0.4
+
+    private struct VisionRead: Sendable {
+        var text: String
+        var lines: [TextLineBox]
+
+        static let empty = VisionRead(text: "", lines: [])
+
+        var recognized: RecognizedText {
+            RecognizedText(text: text)
+        }
+    }
+
     /// Scans the screenshot and returns the richest transcript it can read.
     /// Live Text looks at the whole image. Vision also runs in horizontal bands
     /// because a single request measures each line against the full height and
     /// drops body text in a tall capture. Dark captures are inverted and scanned
     /// again when the normal passes find nothing or only a thin result.
+    /// Text lying on its side, upside down, or on a diagonal is read from a turned
+    /// copy. The search steps every 5 degrees around the circle. A turned copy is
+    /// kept when it contains words the upright pass missed.
     public static func recognize(in image: CGImage) async throws -> RecognizedText {
         let image = standardImage(image)
+        let upright = try await recognizeUpright(in: image)
+        let text = await resolvedTranscript(for: image, upright: upright)
+        return RecognizedText(text: text, visionLanguageCodes: upright.recognized.visionLanguageCodes)
+    }
+
+    private static func recognizeUpright(in image: CGImage) async throws -> VisionRead {
         var candidates: [RecognizedText] = []
+        var lines: [TextLineBox] = []
 
         if let live = try? await liveText(in: image) {
             appendCandidate(live, to: &candidates)
         }
-        appendCandidate(
-            await visionBandsOffMain(scaledIfWide(image)),
-            to: &candidates
-        )
+        let vision = await visionBandsOffMain(scaledIfWide(image))
+        appendCandidate(vision.recognized, to: &candidates)
+        lines.append(contentsOf: vision.lines)
 
         if shouldInvertForOCR(image), let inverted = invertedImage(image) {
             if let live = try? await liveText(in: inverted) {
                 appendCandidate(live, to: &candidates)
             }
-            appendCandidate(
-                await visionBandsOffMain(scaledIfWide(inverted)),
-                to: &candidates
-            )
+            let invertedVision = await visionBandsOffMain(scaledIfWide(inverted))
+            appendCandidate(invertedVision.recognized, to: &candidates)
+            lines.append(contentsOf: invertedVision.lines)
         }
 
-        return bestCandidate(candidates) ?? RecognizedText(text: "")
+        return VisionRead(
+            text: bestCandidate(candidates)?.text ?? "",
+            lines: lines
+        )
     }
 
     /// Vision work is synchronous and can stall. Keep it off the main actor.
-    private static func visionBandsOffMain(_ image: CGImage) async -> RecognizedText {
+    private static func visionBandsOffMain(_ image: CGImage) async -> VisionRead {
         await Task.detached(priority: .userInitiated) {
             await recognizeInHorizontalBands(image)
         }.value
@@ -192,7 +217,7 @@ public enum TextRecognizer {
         in image: CGImage,
         level: VNRequestTextRecognitionLevel,
         recognitionLanguages: [String]?
-    ) throws -> RecognizedText {
+    ) throws -> VisionRead {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = level
         if level == .accurate {
@@ -213,7 +238,8 @@ public enum TextRecognizer {
         }
         let handler = VNImageRequestHandler(cgImage: image)
         try handler.perform([request])
-        return RecognizedText(text: TextLayout.transcript(from: lineBoxes(from: request.results ?? [])))
+        let lines = lineBoxes(from: request.results ?? [])
+        return VisionRead(text: TextLayout.transcript(from: lines), lines: lines)
     }
 
     private static func lineBoxes(from observations: [VNRecognizedTextObservation]) -> [TextLineBox] {
@@ -221,13 +247,13 @@ public enum TextRecognizer {
             guard let candidate = observation.topCandidates(1).first else { return nil }
             let trimmed = candidate.string.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
-            return TextLineBox(text: trimmed, bounds: observation.boundingBox)
+            return TextLineBox(text: trimmed, bounds: observation.boundingBox, confidence: candidate.confidence)
         }
     }
 
     /// Tries the accurate and fast recognizers. One thrown request does not
     /// hide a later pass that can still read the image.
-    private static func recognizeAvailable(in image: CGImage) async throws -> RecognizedText? {
+    private static func recognizeAvailable(in image: CGImage) async throws -> VisionRead? {
         let attempts: [(VNRequestTextRecognitionLevel, [String]?)] = [
             (.accurate, nil),
             (.accurate, fallbackRecognitionLanguages),
@@ -281,13 +307,13 @@ public enum TextRecognizer {
         in image: CGImage,
         level: VNRequestTextRecognitionLevel,
         recognitionLanguages: [String]?
-    ) async throws -> RecognizedText {
+    ) async throws -> VisionRead {
         if level != .accurate {
             return try recognize(in: image, level: level, recognitionLanguages: recognitionLanguages)
         }
 
         do {
-            return try await withThrowingTaskGroup(of: RecognizedText.self) { group in
+            return try await withThrowingTaskGroup(of: VisionRead.self) { group in
                 group.addTask {
                     try await Task.detached(priority: .userInitiated) {
                         try recognize(in: image, level: level, recognitionLanguages: recognitionLanguages)
@@ -320,11 +346,11 @@ public enum TextRecognizer {
         return draw(image, width: maxWidth, height: height) ?? image
     }
 
-    private static func recognizeInHorizontalBands(_ image: CGImage) async -> RecognizedText {
+    private static func recognizeInHorizontalBands(_ image: CGImage) async -> VisionRead {
         let bandHeight = 260
         let overlap = 36
         guard image.height > bandHeight else {
-            return (try? await recognizeAvailable(in: image)) ?? RecognizedText(text: "")
+            return (try? await recognizeAvailable(in: image)) ?? .empty
         }
         var lines: [TextLineBox] = []
         var y = 0
@@ -343,7 +369,8 @@ public enum TextRecognizer {
                             band: rect,
                             imageWidth: imageWidth,
                             imageHeight: imageHeight
-                        )
+                        ),
+                        confidence: box.confidence
                     ))
                 }
             }
@@ -352,7 +379,7 @@ public enum TextRecognizer {
             }
             y += bandHeight - overlap
         }
-        return RecognizedText(text: TextLayout.transcript(from: lines))
+        return VisionRead(text: TextLayout.transcript(from: lines), lines: lines)
     }
 
     private static func lineBoxesOffMain(in image: CGImage) async -> [TextLineBox] {
@@ -398,6 +425,283 @@ public enum TextRecognizer {
         guard let inverted = invert.outputImage else { return nil }
         let context = CIContext(options: nil)
         return context.createCGImage(inverted, from: inverted.extent)
+    }
+
+    private struct PageReading: Sendable {
+        var text: String
+        var confidence: Float
+        var lines: [TextLineBox]
+    }
+
+    /// Reads text that is sideways, upside down, or diagonal. The stored screenshot is not rotated.
+    /// The search steps every 5 degrees. A turned copy replaces the upright transcript when it
+    /// recovers whole words. A label in a free area is appended.
+    private static func resolvedTranscript(for image: CGImage, upright: VisionRead) async -> String {
+        let uprightText = upright.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard contrast(image) >= 0.08 else { return uprightText }
+        let uprightConfidence: Float = upright.lines.isEmpty ? 0.7 : meanConfidence(upright.lines)
+        var body = uprightText
+        var bodyLines = upright.lines
+        var bodyScore = SidewaysText.wordScore(body, confidence: uprightConfidence)
+        var extras: [PageReading] = []
+
+        var sources: [CGImage] = [image]
+        if shouldInvertForOCR(image), let inverted = invertedImage(image) {
+            sources = [inverted, image]
+        }
+        for source in sources {
+            let turns = await orientedReadings(
+                of: source,
+                original: image,
+                uprightScore: bodyScore,
+                uprightLines: bodyLines
+            )
+            for turn in turns {
+                let score = SidewaysText.wordScore(turn.text, confidence: turn.confidence)
+                if score > bodyScore * 1.15 {
+                    if !body.isEmpty {
+                        extras.append(PageReading(text: body, confidence: uprightConfidence, lines: bodyLines))
+                    }
+                    body = turn.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    bodyLines = turn.lines
+                    bodyScore = score
+                } else {
+                    extras.append(turn)
+                }
+            }
+            if bodyScore > SidewaysText.wordScore(uprightText, confidence: uprightConfidence) * 1.15 {
+                break
+            }
+        }
+
+        var combined = body
+        for extra in extras {
+            let kept = nonOverlapping(extra.lines, avoiding: bodyLines)
+            guard !kept.isEmpty else { continue }
+            let addition = SidewaysText.addition(TextLayout.transcript(from: kept), upright: combined)
+            guard !addition.isEmpty else { continue }
+            combined = combined.isEmpty ? addition : combined + "\n\n" + addition
+            bodyLines.append(contentsOf: kept)
+        }
+        return combined
+    }
+
+    private enum ScanTurn: Sendable {
+        case quarter(ImageQuarterTurn)
+        case free(ImageFreeRotation)
+
+        func boundsInOriginal(_ bounds: CGRect, width: CGFloat, height: CGFloat) -> CGRect {
+            switch self {
+            case .quarter(let turn):
+                turn.boundsInOriginal(bounds, originalWidth: width, originalHeight: height)
+            case .free(let rotation):
+                rotation.boundsInOriginal(bounds, originalWidth: width, originalHeight: height)
+            }
+        }
+    }
+
+    private static func orientedReadings(
+        of source: CGImage,
+        original: CGImage,
+        uprightScore: Float,
+        uprightLines: [TextLineBox]
+    ) async -> [PageReading] {
+        var bestTurn: ScanTurn?
+        var bestScore: Float = 0
+        var bestReading = PageReading(text: "", confidence: 0, lines: [])
+
+        func consider(_ turn: ScanTurn, _ reading: PageReading) {
+            let score = SidewaysText.wordScore(reading.text, confidence: reading.confidence)
+            if score > bestScore {
+                bestScore = score
+                bestTurn = turn
+                bestReading = reading
+            }
+        }
+
+        let cardinals = await Task.detached(priority: .userInitiated) {
+            cardinalScans(of: source)
+        }.value
+        let cardinalReadings = await fastProbe(cardinals, original: original)
+        for (index, reading) in cardinalReadings.enumerated() where index < cardinals.count {
+            consider(cardinals[index].0, reading)
+        }
+
+        let degrees = ImageRotationSweep.probeDegrees
+        let batchSize = 8
+        var offset = 0
+        while offset < degrees.count {
+            let batch = Array(degrees[offset..<min(offset + batchSize, degrees.count)])
+            let pairs = await Task.detached(priority: .userInitiated) {
+                probeScans(of: source, degrees: batch)
+            }.value
+            let readings = await fastProbe(pairs, original: original)
+            for (index, reading) in readings.enumerated() where index < pairs.count {
+                consider(pairs[index].0, reading)
+            }
+            offset += batchSize
+        }
+
+        guard bestScore > 0, let bestTurn else { return [] }
+        let novel = !nonOverlapping(bestReading.lines, avoiding: uprightLines).isEmpty
+        let worthKeeping = uprightScore == 0 || bestScore > uprightScore * 0.9 || (novel && bestScore >= 16)
+        guard worthKeeping else { return [] }
+        guard let refined = render(bestTurn, from: source, maxSide: 1600) else {
+            return [bestReading]
+        }
+        let accurate = await pageReading(
+            refined,
+            level: .accurate,
+            turn: bestTurn,
+            original: original,
+            includeLiveText: true
+        )
+        let accurateScore = SidewaysText.wordScore(accurate.text, confidence: accurate.confidence)
+        return [accurateScore >= bestScore ? accurate : bestReading]
+    }
+
+    private static func fastProbe(
+        _ pairs: [(ScanTurn, CGImage)],
+        original: CGImage
+    ) async -> [PageReading] {
+        guard !pairs.isEmpty else { return [] }
+        return await withTaskGroup(of: (Int, PageReading).self) { group in
+            for (index, pair) in pairs.enumerated() {
+                group.addTask {
+                    let reading = await pageReading(
+                        pair.1,
+                        level: .fast,
+                        turn: pair.0,
+                        original: original,
+                        includeLiveText: false
+                    )
+                    return (index, reading)
+                }
+            }
+            var output = Array(repeating: PageReading(text: "", confidence: 0, lines: []), count: pairs.count)
+            for await (index, reading) in group where index < output.count {
+                output[index] = reading
+            }
+            return output
+        }
+    }
+
+    /// Quarter turns cover both sideways directions. A half turn covers upside-down text.
+    private static func cardinalScans(of source: CGImage) -> [(ScanTurn, CGImage)] {
+        var scans: [(ScanTurn, CGImage)] = []
+        for turn in [ImageQuarterTurn.clockwise, .counterClockwise] {
+            if let turned = turn.image(from: source) {
+                scans.append((.quarter(turn), scaledDown(turned, maxSide: 1200)))
+            }
+        }
+        let half = ImageFreeRotation(radians: .pi)
+        if let turned = half.image(from: source) {
+            scans.append((.free(half), scaledDown(turned, maxSide: 1200)))
+        }
+        return scans
+    }
+
+    /// Every remaining 5 degree step. The fast probe uses a smaller image; the winner is read again at full size.
+    private static func probeScans(of source: CGImage, degrees: [Int]) -> [(ScanTurn, CGImage)] {
+        degrees.compactMap { degrees in
+            let rotation = ImageFreeRotation(radians: CGFloat(degrees) * .pi / 180)
+            guard let turned = rotation.image(from: source) else { return nil }
+            return (.free(rotation), scaledDown(turned, maxSide: 720))
+        }
+    }
+
+    private static func render(_ turn: ScanTurn, from source: CGImage, maxSide: Int) -> CGImage? {
+        let turned: CGImage?
+        switch turn {
+        case .quarter(let quarter):
+            turned = quarter.image(from: source)
+        case .free(let rotation):
+            turned = rotation.image(from: source)
+        }
+        guard let turned else { return nil }
+        return scaledDown(turned, maxSide: maxSide)
+    }
+
+    private static func pageReading(
+        _ image: CGImage,
+        level: VNRequestTextRecognitionLevel,
+        turn: ScanTurn,
+        original: CGImage,
+        includeLiveText: Bool
+    ) async -> PageReading {
+        async let visionTask = visionRead(image, level: level)
+        let live = includeLiveText ? ((try? await liveText(in: image)) ?? "") : ""
+        let vision = await visionTask
+        let text = richer(live, vision.text)
+        let confidence = vision.lines.isEmpty ? (live.isEmpty ? 0 : 0.75) : meanConfidence(vision.lines)
+        let lines = vision.lines.map { line in
+            TextLineBox(
+                text: line.text,
+                bounds: turn.boundsInOriginal(
+                    line.bounds,
+                    width: CGFloat(original.width),
+                    height: CGFloat(original.height)
+                ),
+                confidence: line.confidence
+            )
+        }
+        return PageReading(text: text, confidence: confidence, lines: lines)
+    }
+
+    private static func visionRead(_ image: CGImage, level: VNRequestTextRecognitionLevel) async -> VisionRead {
+        if level == .accurate {
+            return (try? await recognizeWithTimeout(
+                in: image,
+                level: .accurate,
+                recognitionLanguages: fallbackRecognitionLanguages
+            )) ?? .empty
+        }
+        return await Task.detached(priority: .userInitiated) {
+            (try? recognize(in: image, level: .fast, recognitionLanguages: fallbackRecognitionLanguages)) ?? .empty
+        }.value
+    }
+
+    private static func scaledDown(_ image: CGImage, maxSide: Int) -> CGImage {
+        let longest = max(image.width, image.height)
+        guard longest > maxSide else { return image }
+        let scale = Double(maxSide) / Double(longest)
+        let width = max(Int((Double(image.width) * scale).rounded()), 1)
+        let height = max(Int((Double(image.height) * scale).rounded()), 1)
+        return draw(image, width: width, height: height) ?? image
+    }
+
+    private static func richer(_ first: String, _ second: String) -> String {
+        let left = first.trimmingCharacters(in: .whitespacesAndNewlines)
+        let right = second.trimmingCharacters(in: .whitespacesAndNewlines)
+        if left.isEmpty { return right }
+        if right.isEmpty { return left }
+        let leftScore = SidewaysText.wordScore(left, confidence: 1)
+        let rightScore = SidewaysText.wordScore(right, confidence: 1)
+        if leftScore == rightScore {
+            return left.count >= right.count ? left : right
+        }
+        return leftScore > rightScore ? left : right
+    }
+
+    private static func nonOverlapping(_ lines: [TextLineBox], avoiding existing: [TextLineBox]) -> [TextLineBox] {
+        guard !existing.isEmpty else { return [] }
+        return lines.filter { line in
+            guard line.confidence >= sidewaysConfidence else { return false }
+            return !existing.contains { overlapFraction($0.bounds, line.bounds) > 0.45 }
+        }
+    }
+
+    private static func meanConfidence(_ lines: [TextLineBox]) -> Float {
+        guard !lines.isEmpty else { return 0 }
+        return lines.reduce(Float(0)) { $0 + $1.confidence } / Float(lines.count)
+    }
+
+    private static func overlapFraction(_ upright: CGRect, _ sideways: CGRect) -> CGFloat {
+        let hit = upright.intersection(sideways)
+        guard !hit.isNull, !hit.isEmpty else { return 0 }
+        let area = sideways.width * sideways.height
+        guard area > 0 else { return 0 }
+        return (hit.width * hit.height) / area
     }
 
     private static func appendCandidate(_ text: String, to candidates: inout [RecognizedText]) {

@@ -73,6 +73,14 @@ public enum LanguageDetector {
         code.split(separator: "-").first.map(String.init)?.lowercased() ?? code.lowercased()
     }
 
+    /// Latin text keeps its words. A stray character from another script is not sent to Translation,
+    /// because that character can make macOS wait forever on a language download.
+    public static func textForTranslation(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isMostlyLatin(trimmed) else { return trimmed }
+        return withoutCJK(trimmed)
+    }
+
     private static func naturalLanguageCode(in text: String) -> (code: String, confidence: Double)? {
         let compact = text
             .replacingOccurrences(of: "\n", with: " ")

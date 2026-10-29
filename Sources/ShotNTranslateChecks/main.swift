@@ -10,6 +10,9 @@ struct ShotNTranslateChecks {
             try checkLocalization()
             try await checkCaptureFoundation()
             try checkImageRegion()
+            try checkQuarterTurn()
+            try checkImageRotation()
+            try checkSidewaysText()
             try checkTranslationText()
             try await checkPreferences()
             try checkReleases()
@@ -136,6 +139,14 @@ private func checkCaptureFoundation() async throws {
         "Han text without kana is Chinese"
     )
     try expect(LanguageDetector.detectCode(in: "\u{3042}") != "ja", "A single kana character is not Japanese")
+    try expect(
+        !LanguageDetector.textForTranslation("Mucus Layer - \u{CD9C}").unicodeScalars.contains { $0.value == 0xCD9C },
+        "A stray Hangul mark is not sent with Latin text"
+    )
+    try expect(
+        LanguageDetector.textForTranslation("Mucus Layer - \u{CD9C}").contains("Mucus"),
+        "Latin words stay when a stray character is removed"
+    )
     try expect(LanguageDetector.matches("en-US", target: .english), "Regional English matches the English target")
     try expect(!LanguageDetector.matches("tr", target: .english), "Turkish does not match the English target")
 
@@ -153,6 +164,51 @@ private func checkCaptureFoundation() async throws {
     let image = try renderedTextImage("HELLO")
     let recognized = try await TextRecognizer.recognize(in: image)
     try expect(recognized.text.uppercased().contains("HELLO"), "Vision reads rendered text, got \(recognized.text)")
+    let uprightLetters = recognized.text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+    try expect(uprightLetters < 30, "Horizontal text is not duplicated by a sideways pass, got \(recognized.text)")
+
+    let sidewaysSource = try renderedTextImage("SIDEWAYS LABEL", width: 900, height: 180, fontSize: 64)
+    guard let sidewaysImage = ImageQuarterTurn.clockwise.image(from: sidewaysSource) else {
+        throw CheckError(description: "Could not turn the sideways fixture")
+    }
+    let sideways = try await TextRecognizer.recognize(in: sidewaysImage)
+    try expect(
+        sideways.text.uppercased().contains("SIDEWAYS"),
+        "Text lying on its side is read, got \(sideways.text)"
+    )
+    try expect(
+        !sideways.text.uppercased().contains("NAYS"),
+        "A split misread does not replace the restored line, got \(sideways.text)"
+    )
+    let sidewaysLetters = sideways.text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+    try expect(sidewaysLetters < 40, "Only the restored line is kept, got \(sideways.text)")
+
+    guard let otherWay = ImageQuarterTurn.counterClockwise.image(from: sidewaysSource) else {
+        throw CheckError(description: "Could not turn the other sideways fixture")
+    }
+    let other = try await TextRecognizer.recognize(in: otherWay)
+    try expect(
+        other.text.uppercased().contains("SIDEWAYS"),
+        "Text turned the other way is read, got \(other.text)"
+    )
+
+    guard let upsideDownImage = ImageFreeRotation(radians: .pi).image(from: sidewaysSource) else {
+        throw CheckError(description: "Could not turn the upside-down fixture")
+    }
+    let upsideDown = try await TextRecognizer.recognize(in: upsideDownImage)
+    try expect(
+        upsideDown.text.uppercased().contains("SIDEWAYS"),
+        "Upside-down text is read, got \(upsideDown.text)"
+    )
+
+    for degrees in [15, 50, 125, 200] {
+        let diagonal = try renderedAngledText("DIAGONAL LABEL", degrees: CGFloat(degrees))
+        let diagonalText = try await TextRecognizer.recognize(in: diagonal)
+        try expect(
+            diagonalText.text.uppercased().contains("DIAGONAL"),
+            "Text at \(degrees) degrees is read, got \(diagonalText.text)"
+        )
+    }
 
     let page = try renderedTextImage(
         "Install and open the latest Mac release",
@@ -347,6 +403,190 @@ private func checkPreviewPDF(image: CGImage) throws {
 }
 
 @MainActor
+private func checkImageRotation() throws {
+    let degrees = ImageRotationSweep.degrees
+    try expect(degrees.count == 72, "A full circle in 5 degree steps has 72 angles, got \(degrees.count)")
+    try expect(degrees.first == 0 && degrees.last == 355, "The circle runs from 0 through 355, got \(degrees)")
+    try expect(
+        zip(degrees, degrees.dropFirst()).allSatisfy { $1 - $0 == ImageRotationSweep.stepDegrees },
+        "Each step is 5 degrees"
+    )
+    try expect(degrees.contains(50), "50 degrees is one of the steps")
+    try expect(ImageRotationSweep.probeDegrees.count == 68, "Free turns cover every step except the four exact turns")
+    try expect(
+        Set(ImageRotationSweep.probeDegrees).isDisjoint(with: [0, 90, 180, 270]),
+        "Upright, sideways, and upside-down turns are not probed twice"
+    )
+
+    let rotation = ImageFreeRotation(radians: 40 * .pi / 180)
+    let point = CGPoint(x: 0.3, y: 0.6)
+    let forward = rotation.normalizedPointAfterTurn(point, originalWidth: 200, originalHeight: 120)
+    let back = rotation.normalizedPointInOriginal(forward, originalWidth: 200, originalHeight: 120)
+    try expect(abs(back.x - point.x) < 0.02, "A diagonal turn maps a point back in x, got \(back)")
+    try expect(abs(back.y - point.y) < 0.02, "A diagonal turn maps a point back in y, got \(back)")
+
+    let image = try halfToneImage(width: 40, height: 20)
+    let half = ImageFreeRotation(radians: .pi)
+    guard let turned = half.image(from: image) else {
+        throw CheckError(description: "A half turn should produce an image")
+    }
+    try expect(turned.width == 40 && turned.height == 20, "A half turn keeps the size, got \(turned.width)x\(turned.height)")
+    try expect(
+        regionLuminance(turned, CGRect(x: 0.5, y: 0, width: 0.5, height: 1)) > 0.7,
+        "Upside down moves the white half to the right"
+    )
+    let mapped = half.boundsInOriginal(
+        CGRect(x: 0.5, y: 0, width: 0.5, height: 1),
+        originalWidth: 40,
+        originalHeight: 20
+    )
+    try expect(abs(mapped.minX) < 0.08, "The moved half maps back to the left edge, got \(mapped)")
+    try expect(mapped.midX < 0.5, "The moved half maps back onto the original white half, got \(mapped)")
+}
+
+private func renderedAngledText(_ text: String, degrees: CGFloat) throws -> CGImage {
+    let width = 1100
+    let height = 700
+    guard let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: width,
+        pixelsHigh: height,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ) else {
+        throw CheckError(description: "Could not create an angled text image")
+    }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSColor.white.setFill()
+    NSRect(x: 0, y: 0, width: width, height: height).fill()
+    let transform = NSAffineTransform()
+    transform.translateX(by: CGFloat(width) / 2, yBy: CGFloat(height) / 2)
+    transform.rotate(byDegrees: degrees)
+    transform.concat()
+    let attributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 64, weight: .regular),
+        .foregroundColor: NSColor.black
+    ]
+    (text as NSString).draw(at: NSPoint(x: -280, y: -32), withAttributes: attributes)
+    NSGraphicsContext.restoreGraphicsState()
+    guard let image = rep.cgImage else {
+        throw CheckError(description: "Could not read the angled text image")
+    }
+    return image
+}
+
+private func checkQuarterTurn() throws {
+    let image = try halfToneImage(width: 40, height: 20)
+    guard let turned = ImageQuarterTurn.clockwise.image(from: image),
+          let restored = ImageQuarterTurn.clockwise.opposite.image(from: turned) else {
+        throw CheckError(description: "Quarter turn should produce an image")
+    }
+    try expect(turned.width == 20 && turned.height == 40, "A quarter turn swaps the sides, got \(turned.width)x\(turned.height)")
+    try expect(restored.width == 40 && restored.height == 20, "The opposite turn restores the size")
+    try expect(regionLuminance(restored, CGRect(x: 0, y: 0, width: 0.5, height: 1)) > 0.7, "Round trip keeps the white half")
+    try expect(regionLuminance(restored, CGRect(x: 0.5, y: 0, width: 0.5, height: 1)) < 0.3, "Round trip keeps the black half")
+
+    let leftHalf = CGRect(x: 0, y: 0, width: 0.5, height: 1)
+    let turnedRect = ImageQuarterTurn.clockwise.boundsAfterTurn(leftHalf, originalWidth: 40, originalHeight: 20)
+    try expect(
+        regionLuminance(turned, turnedRect) > 0.7,
+        "The turned white half stays white, got \(regionLuminance(turned, turnedRect))"
+    )
+    let back = ImageQuarterTurn.clockwise.boundsInOriginal(turnedRect, originalWidth: 40, originalHeight: 20)
+    try expect(abs(back.minX - leftHalf.minX) < 0.02, "Mapped box returns to the left edge, got \(back)")
+    try expect(abs(back.width - leftHalf.width) < 0.02, "Mapped box keeps the left-half width, got \(back)")
+
+    let point = CGRect(x: 0.25, y: 0.4, width: 0.1, height: 0.2)
+    let forward = ImageQuarterTurn.counterClockwise.boundsAfterTurn(point, originalWidth: 80, originalHeight: 50)
+    let inverse = ImageQuarterTurn.counterClockwise.boundsInOriginal(forward, originalWidth: 80, originalHeight: 50)
+    try expect(abs(inverse.minX - point.minX) < 0.001, "Counter-clockwise mapping is reversible in x")
+    try expect(abs(inverse.minY - point.minY) < 0.001, "Counter-clockwise mapping is reversible in y")
+}
+
+private func checkSidewaysText() throws {
+    let recovered = SidewaysText.addition("SIDEWAYS LABEL", upright: "")
+    try expect(recovered.uppercased().contains("SIDEWAYS"), "Sideways text is kept when the upright pass is empty")
+    try expect(
+        SidewaysText.addition("Hello world", upright: "Hello world from the screen").isEmpty,
+        "Words already read upright are not added again"
+    )
+    try expect(SidewaysText.addition("xy", upright: "").isEmpty, "A two-letter misread is not text")
+
+    let chosen = SidewaysText.preferred(
+        [
+            ("A real sideways sentence about the capture", 0.9),
+            ("noise", 0.3)
+        ],
+        upright: ""
+    )
+    try expect(chosen.count == 1, "A weak misread loses to the stronger direction, got \(chosen)")
+    try expect(chosen[0].lowercased().contains("sideways"), "The stronger direction is the one that is kept")
+    try expect(
+        SidewaysText.wordScore("SIDEWAYS LABEL", confidence: 0.5)
+            > SidewaysText.wordScore("BEL NAYS LAB SIDEW", confidence: 1) * 1.15,
+        "A restored line outscores a confident but split misread"
+    )
+    try expect(
+        SidewaysText.wordScore("DIAGONAL LABEL", confidence: 0.5)
+            > SidewaysText.wordScore("DIMGOI4MLLMBeL", confidence: 1),
+        "A spaced line outscores one glued misread"
+    )
+
+    let both = SidewaysText.preferred(
+        [
+            ("Chapter notes", 0.8),
+            ("Other column text", 0.75)
+        ],
+        upright: ""
+    )
+    try expect(both.count == 2, "Two strong directions are both kept, got \(both)")
+}
+
+private func halfToneImage(width: Int, height: Int) throws -> CGImage {
+    guard let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: width,
+        pixelsHigh: height,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ) else {
+        throw CheckError(description: "Could not create a half-tone image")
+    }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSColor.white.setFill()
+    NSRect(x: 0, y: 0, width: width / 2, height: height).fill()
+    NSColor.black.setFill()
+    NSRect(x: width / 2, y: 0, width: width - width / 2, height: height).fill()
+    NSGraphicsContext.restoreGraphicsState()
+    guard let image = rep.cgImage else {
+        throw CheckError(description: "Could not read the half-tone image")
+    }
+    return image
+}
+
+private func regionLuminance(_ image: CGImage, _ normalizedBottomLeft: CGRect) -> Double {
+    let pixel = CGRect(
+        x: normalizedBottomLeft.minX * CGFloat(image.width),
+        y: (1 - normalizedBottomLeft.maxY) * CGFloat(image.height),
+        width: normalizedBottomLeft.width * CGFloat(image.width),
+        height: normalizedBottomLeft.height * CGFloat(image.height)
+    ).integral
+    guard pixel.width >= 1, pixel.height >= 1, let crop = image.cropping(to: pixel) else { return 0 }
+    return TextRecognizer.meanLuminance(crop)
+}
+
 private func checkImageRegion() throws {
     let frame = ImageRegionGeometry.displayFrame(
         imageWidth: 400,
