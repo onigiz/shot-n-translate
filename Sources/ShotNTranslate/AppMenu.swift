@@ -39,6 +39,10 @@ struct AppMenu: View {
         }
         .disabled(translator.isBusy)
 
+        Button(L10n.string(.cardLibrary, language: language)) {
+            router.showCardLibrary()
+        }
+
         Menu(L10n.string(.shortcutsMenu, language: language)) {
             ForEach(ShortcutCatalog.items) { spec in
                 Button(shortcutTitle(spec.function, language: language)) {
@@ -100,6 +104,8 @@ struct AppMenu: View {
             L10n.string(.checkForUpdates, language: language)
         case .showUpdateHistory:
             L10n.string(.updateHistory, language: language)
+        case .showCardLibrary:
+            L10n.string(.cardLibrary, language: language)
         }
     }
 
@@ -117,6 +123,8 @@ struct AppMenu: View {
         case .checkForUpdates:
             updateCenter.isBusy
         case .showUpdateHistory:
+            false
+        case .showCardLibrary:
             false
         }
     }

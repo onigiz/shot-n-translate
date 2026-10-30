@@ -97,6 +97,35 @@ public enum L10nKey: CaseIterable, Sendable {
     case colorOrange
     case colorGreen
     case colorBlue
+    case cardLibrary
+    case cardLibraryTitle
+    case chooseCardLibraryFolder
+    case changeCardLibraryFolder
+    case cardLibraryEmptyFolder
+    case cardLibraryChoosePrompt
+    case cardLibraryNoCards
+    case cardLibraryNoCardsHint
+    case cardLibraryLoadFailed
+    case refreshCardLibrary
+    case cardSort
+    case cardSortNameAscending
+    case cardSortNameDescending
+    case cardSortCreatedNewest
+    case cardSortCreatedOldest
+    case cardSortModifiedNewest
+    case cardSortModifiedOldest
+    case saveCard
+    case cardSaved
+    case cardSaveFailed
+    case openCard
+    case renameCard
+    case deleteCard
+    case cardName
+    case cardNoText
+    case cardOpenFailed
+    case cardRenameFailed
+    case cardDeleteFailed
+    case cardTitleTaken
 }
 
 public enum L10n {
@@ -264,6 +293,35 @@ public enum L10n {
         case .colorOrange: "Turuncu"
         case .colorGreen: "Yeşil"
         case .colorBlue: "Mavi"
+        case .cardLibrary: "Kart kütüphanesi…"
+        case .cardLibraryTitle: "Kart kütüphanesi"
+        case .chooseCardLibraryFolder: "Kütüphane klasörünü seç"
+        case .changeCardLibraryFolder: "Klasörü değiştir"
+        case .cardLibraryEmptyFolder: "Henüz bir kütüphane klasörü yok"
+        case .cardLibraryChoosePrompt: "Kartların kaydedileceği klasörü seçin. Sonra çevirileri buradan açıp düzenleyebilirsiniz."
+        case .cardLibraryNoCards: "Bu klasörde kart yok"
+        case .cardLibraryNoCardsHint: "Bir çeviriyi kaydettiğinizde burada kart olarak görünür."
+        case .cardLibraryLoadFailed: "Kart kütüphanesi okunamadı."
+        case .refreshCardLibrary: "Kütüphaneyi yenile"
+        case .cardSort: "Sıralama"
+        case .cardSortNameAscending: "Ada göre (A→Z)"
+        case .cardSortNameDescending: "Ada göre (Z→A)"
+        case .cardSortCreatedNewest: "Oluşturma (yeni→eski)"
+        case .cardSortCreatedOldest: "Oluşturma (eski→yeni)"
+        case .cardSortModifiedNewest: "Değiştirme (yeni→eski)"
+        case .cardSortModifiedOldest: "Değiştirme (eski→yeni)"
+        case .saveCard: "Kütüphaneye kaydet"
+        case .cardSaved: "Kart kütüphaneye kaydedildi."
+        case .cardSaveFailed: "Kart kaydedilemedi."
+        case .openCard: "Kartı aç"
+        case .renameCard: "Kartı yeniden adlandır"
+        case .deleteCard: "Kartı sil"
+        case .cardName: "Kart adı"
+        case .cardNoText: "Metin yok"
+        case .cardOpenFailed: "Kart açılamadı."
+        case .cardRenameFailed: "Kart yeniden adlandırılamadı."
+        case .cardDeleteFailed: "Kart silinemedi."
+        case .cardTitleTaken: "Bu adla bir kart zaten var."
         }
     }
 
@@ -365,6 +423,35 @@ public enum L10n {
         case .colorOrange: "Orange"
         case .colorGreen: "Green"
         case .colorBlue: "Blue"
+        case .cardLibrary: "Card Library…"
+        case .cardLibraryTitle: "Card Library"
+        case .chooseCardLibraryFolder: "Choose library folder"
+        case .changeCardLibraryFolder: "Change folder"
+        case .cardLibraryEmptyFolder: "No library folder yet"
+        case .cardLibraryChoosePrompt: "Choose the folder where cards are stored. You can open and edit translations from there later."
+        case .cardLibraryNoCards: "No cards in this folder"
+        case .cardLibraryNoCardsHint: "When you save a translation, it appears here as a card."
+        case .cardLibraryLoadFailed: "The card library could not be read."
+        case .refreshCardLibrary: "Refresh library"
+        case .cardSort: "Sort"
+        case .cardSortNameAscending: "Name (A→Z)"
+        case .cardSortNameDescending: "Name (Z→A)"
+        case .cardSortCreatedNewest: "Created (newest)"
+        case .cardSortCreatedOldest: "Created (oldest)"
+        case .cardSortModifiedNewest: "Modified (newest)"
+        case .cardSortModifiedOldest: "Modified (oldest)"
+        case .saveCard: "Save to Library"
+        case .cardSaved: "The card was saved to the library."
+        case .cardSaveFailed: "The card could not be saved."
+        case .openCard: "Open card"
+        case .renameCard: "Rename card"
+        case .deleteCard: "Delete card"
+        case .cardName: "Card name"
+        case .cardNoText: "No text"
+        case .cardOpenFailed: "The card could not be opened."
+        case .cardRenameFailed: "The card could not be renamed."
+        case .cardDeleteFailed: "The card could not be deleted."
+        case .cardTitleTaken: "A card with that name already exists."
         }
     }
 }

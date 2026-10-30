@@ -196,7 +196,15 @@ struct TranslationResultView: View {
             HStack(spacing: 12) {
                 if let notice = translator.saveNotice {
                     Text(L10n.string(notice, language: language))
-                        .foregroundStyle(notice == .pdfSaved ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
+                        .foregroundStyle(
+                            notice == .pdfSaved || notice == .cardSaved
+                                ? AnyShapeStyle(.secondary)
+                                : AnyShapeStyle(.red)
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let title = translator.openCardTitle {
+                    Text(title)
+                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Spacer()
@@ -204,8 +212,12 @@ struct TranslationResultView: View {
                 Button(L10n.string(.savePDF, language: language)) {
                     translator.savePDF()
                 }
-                .buttonStyle(.borderedProminent)
                 .disabled(!translator.canSaveFormattedPDF)
+                Button(L10n.string(.saveCard, language: language)) {
+                    translator.saveCard()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!translator.canSaveCard)
             }
         }
     }

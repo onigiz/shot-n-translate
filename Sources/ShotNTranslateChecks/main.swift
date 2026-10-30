@@ -13,6 +13,7 @@ struct ShotNTranslateChecks {
             try checkQuarterTurn()
             try checkImageRotation()
             try checkPreviewMarkup()
+            try checkCardLibrary()
             try checkSidewaysText()
             try checkTranslationText()
             try await checkPreferences()
@@ -585,6 +586,76 @@ private func pixelColor(_ image: CGImage, x: Int, y: Int) -> (red: CGFloat, gree
         return (0, 0, 0)
     }
     return (color.redComponent, color.greenComponent, color.blueComponent)
+}
+
+private func checkCardLibrary() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let day = calendar.date(from: DateComponents(year: 2026, month: 10, day: 30))!
+    try expect(CardNaming.dayStamp(for: day, calendar: calendar) == "30102026", "Day stamp uses ddMMyyyy")
+    try expect(
+        CardNaming.nextTitle(existing: ["30102026_1", "other"], on: day, calendar: calendar) == "30102026_2",
+        "The next card for the day takes the next free index"
+    )
+    try expect(
+        CardNaming.nextTitle(existing: [], on: day, calendar: calendar) == "30102026_1",
+        "The first card of the day is _1"
+    )
+    try expect(CardNaming.sanitizedFileName("  hello/world  ") == "hello_world", "Unsafe title characters are replaced")
+
+    let older = LibraryCardSummary(
+        packageURL: URL(fileURLWithPath: "/tmp/a.sntcard"),
+        title: "B",
+        createdAt: Date(timeIntervalSince1970: 1),
+        modifiedAt: Date(timeIntervalSince1970: 10),
+        previewText: "older",
+        editorIsDark: false
+    )
+    let newer = LibraryCardSummary(
+        packageURL: URL(fileURLWithPath: "/tmp/b.sntcard"),
+        title: "A",
+        createdAt: Date(timeIntervalSince1970: 2),
+        modifiedAt: Date(timeIntervalSince1970: 20),
+        previewText: "newer",
+        editorIsDark: true
+    )
+    try expect(CardSort.nameAscending.sorted([older, newer]).map(\.title) == ["A", "B"], "Name ascending")
+    try expect(CardSort.modifiedNewest.sorted([older, newer]).map(\.title) == ["A", "B"], "Modified newest")
+    try expect(CardSort.createdOldest.sorted([newer, older]).map(\.title) == ["B", "A"], "Created oldest")
+
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("snt-cards-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let image = try solidImage(width: 40, height: 20, color: .white)
+    var markup = PreviewMarkup()
+    markup.marks = [
+        PreviewMark(kind: .circle, bounds: CGRect(x: 0.2, y: 0.2, width: 0.4, height: 0.4), red: 1, green: 0, blue: 0, strokePixels: 4)
+    ]
+    let title = try CardPackage.nextTitle(in: root, on: day)
+    let package = CardNaming.packageURL(named: title, in: root)
+    let document = CardDocument(
+        title: title,
+        createdAt: day,
+        modifiedAt: day,
+        editorIsDark: true,
+        clockwiseDegrees: 12.5,
+        markup: markup,
+        previewText: "Saved translation"
+    )
+    let rtf = Data("{\\rtf1\\ansi Saved translation}".utf8)
+    try CardPackage.write(document: document, capture: image, translationRTF: rtf, to: package)
+    let loaded = try CardPackage.readDocument(at: package)
+    try expect(loaded.title == title, "Card title round-trips")
+    try expect(abs(loaded.clockwiseDegrees - 12.5) < 0.001, "Card rotation round-trips")
+    try expect(loaded.previewMarkup.marks.count == 1, "Card marks round-trip")
+    try expect(loaded.previewMarkup.marks[0].kind == .circle, "Card mark kind round-trips")
+    let capture = try CardPackage.readCapture(at: package)
+    try expect(capture.width == 40 && capture.height == 20, "Card capture round-trips")
+    let listed = try CardPackage.list(in: root)
+    try expect(listed.count == 1 && listed[0].title == title, "The library lists the package")
+    let renamed = try CardPackage.rename(packageURL: package, to: "notes_today")
+    try expect(CardNaming.title(fromPackageURL: renamed) == "notes_today", "Rename moves the package")
+    try expect(try CardPackage.readDocument(at: renamed).title == "notes_today", "Rename updates the document title")
 }
 
 private func renderedAngledText(_ text: String, degrees: CGFloat) throws -> CGImage {
