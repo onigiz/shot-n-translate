@@ -22,6 +22,7 @@ final class ShortcutRouter {
     let translator: ScreenshotTranslator
     let updateCenter: UpdateCenter
     var openUpdateHistory: @MainActor () -> Void = {}
+    var openCardLibrary: @MainActor () -> Void = {}
 
     init(translator: ScreenshotTranslator, updateCenter: UpdateCenter) {
         self.translator = translator
@@ -37,6 +38,8 @@ final class ShortcutRouter {
             showUpdateHistory(checking: true)
         case .showUpdateHistory:
             showUpdateHistory(checking: false)
+        case .showCardLibrary:
+            showCardLibrary()
         }
     }
 
@@ -45,5 +48,10 @@ final class ShortcutRouter {
         openUpdateHistory()
         guard checking else { return }
         Task { await updateCenter.checkForUpdates() }
+    }
+
+    func showCardLibrary() {
+        NSApp.activate()
+        openCardLibrary()
     }
 }

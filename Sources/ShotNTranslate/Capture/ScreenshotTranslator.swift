@@ -33,6 +33,9 @@ final class ScreenshotTranslator {
     private(set) var draft = NSAttributedString()
     private(set) var draftToken = UUID()
     private(set) var editorIsDark = false
+    /// Package currently open from the card library, if any.
+    private(set) var openCardURL: URL?
+    private(set) var openCardTitle: String?
     /// Full-resolution capture kept until the preview window closes.
     private var capturedImage: CGImage?
     private var pendingText: String?
@@ -43,10 +46,12 @@ final class ScreenshotTranslator {
     /// Menu-bar apps do not present the system language download. Raise the
     /// app only while that download can still be requested.
     private var activationRaisedForDownload = false
+    private var openCardCreatedAt: Date?
 
     var currentTranslationID: UUID { translationID }
     private var draftWasSeeded = false
     let editing = TranslationEditingController()
+    let libraryFolder = LibraryFolderStore.shared
 
     private let settings: TranslationSettings
     private let languageStore: LanguageStore
@@ -63,6 +68,10 @@ final class ScreenshotTranslator {
         !isTranslating && !draft.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    var canSaveCard: Bool {
+        canSaveFormattedPDF && capturedImage != nil
+    }
+
     func setEditorSurface(isDark: Bool) {
         guard editorIsDark != isDark else { return }
         editorIsDark = isDark
@@ -77,9 +86,12 @@ final class ScreenshotTranslator {
         let selector = RegionSelector()
         guard let rect = await selector.select(instruction: instruction) else { return }
         TranslationResultWindow.hideWithoutReleasing()
+        CardLibraryWindow.hide()
+        ScreenRegionCapture.concealOwnWindows()
         let session = beginSession()
         // The selection shade is full-screen. Capturing before it leaves the
-        // compositor produces a black rectangle where the page was.
+        // compositor produces a black rectangle. Our own windows are white
+        // and would be photographed in its place.
         do {
             try await Task.sleep(nanoseconds: 550_000_000)
         } catch {
@@ -197,6 +209,121 @@ final class ScreenshotTranslator {
         }
     }
 
+    /// Saves the editable card into the chosen library folder.
+    func saveCard() {
+        guard canSaveCard, let image = capturedImage else { return }
+        if libraryFolder.folderURL == nil {
+            chooseLibraryFolderThenSave()
+            return
+        }
+        persistCard(capture: image)
+    }
+
+    private func chooseLibraryFolderThenSave() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = L10n.string(.chooseCardLibraryFolder, language: languageStore.language)
+        NSApp.activate()
+        panel.begin { [weak self] response in
+            guard let self, response == .OK, let url = panel.url, let image = self.capturedImage else { return }
+            self.libraryFolder.remember(url)
+            self.persistCard(capture: image)
+        }
+    }
+
+    private func persistCard(capture: CGImage) {
+        do {
+            let rtf = try draft.data(
+                from: NSRange(location: 0, length: draft.length),
+                documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+            )
+            let saved = try libraryFolder.withFolder { folder -> (url: URL, createdAt: Date, title: String) in
+                if let existingURL = openCardURL {
+                    let previous = try? CardPackage.readDocument(at: existingURL)
+                    let title = openCardTitle ?? previous?.title ?? CardNaming.title(fromPackageURL: existingURL)
+                    let createdAt = openCardCreatedAt ?? previous?.createdAt ?? Date()
+                    let document = CardDocument(
+                        title: title,
+                        createdAt: createdAt,
+                        modifiedAt: Date(),
+                        editorIsDark: editorIsDark,
+                        clockwiseDegrees: previewTurn.clockwiseDegrees,
+                        markup: previewMarkup,
+                        previewText: draft.string
+                    )
+                    try CardPackage.write(
+                        document: document,
+                        capture: capture,
+                        translationRTF: rtf,
+                        to: existingURL
+                    )
+                    return (existingURL, createdAt, title)
+                }
+                let title = try CardPackage.nextTitle(in: folder)
+                let createdAt = Date()
+                let destination = CardNaming.packageURL(named: title, in: folder)
+                let document = CardDocument(
+                    title: title,
+                    createdAt: createdAt,
+                    modifiedAt: createdAt,
+                    editorIsDark: editorIsDark,
+                    clockwiseDegrees: previewTurn.clockwiseDegrees,
+                    markup: previewMarkup,
+                    previewText: draft.string
+                )
+                try CardPackage.write(
+                    document: document,
+                    capture: capture,
+                    translationRTF: rtf,
+                    to: destination
+                )
+                return (destination, createdAt, title)
+            }
+            openCardURL = saved.url
+            openCardTitle = saved.title
+            openCardCreatedAt = saved.createdAt
+            saveNotice = .cardSaved
+        } catch {
+            saveNotice = .cardSaveFailed
+        }
+    }
+
+    /// Opens an editable card from the library into the result window.
+    func openCard(at packageURL: URL) throws {
+        _ = libraryFolder.startAccessing()
+        defer { libraryFolder.stopAccessing() }
+        let document = try CardPackage.readDocument(at: packageURL)
+        let capture = try CardPackage.readCapture(at: packageURL)
+        let rtf = try CardPackage.readTranslationRTF(at: packageURL)
+        let attributed = try NSAttributedString(
+            data: rtf,
+            options: [.documentType: NSAttributedString.DocumentType.rtf],
+            documentAttributes: nil
+        )
+        _ = beginSession()
+        capturedImage = capture
+        previewMarkup = document.previewMarkup
+        previewTurn = PreviewImageTurn(clockwiseDegrees: document.clockwiseDegrees)
+        editorIsDark = document.editorIsDark
+        openCardURL = packageURL
+        openCardTitle = document.title
+        openCardCreatedAt = document.createdAt
+        draft = attributed
+        draftToken = UUID()
+        draftWasSeeded = true
+        capturePreview = fittedPreview(of: PreviewMarkupImage.image(from: capture, markup: previewMarkup))
+        presentation = .result(CaptureTranslation(
+            original: attributed.string,
+            sourceLanguageCode: nil,
+            translatedText: attributed.string,
+            note: nil
+        ))
+        TranslationResultWindow.show(translator: self, languageStore: languageStore)
+    }
+
     private func readableText(in image: CGImage) async throws -> RecognizedText? {
         let recognized = try await TextRecognizer.recognize(in: image)
         guard !recognized.text.isEmpty else { return nil }
@@ -220,6 +347,9 @@ final class ScreenshotTranslator {
         draft = NSAttributedString()
         draftToken = UUID()
         draftWasSeeded = false
+        openCardURL = nil
+        openCardTitle = nil
+        openCardCreatedAt = nil
         translationID = UUID()
         presentation = .idle
         return id

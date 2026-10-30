@@ -23,6 +23,15 @@ enum ScreenRegionCapture {
     /// ScreenCaptureKit presents the system dialog on every call when the stored
     /// grant does not match this binary. Preflight does not present a dialog,
     /// so a missing grant stops here.
+    /// Our own windows are white. If they are still on screen, the shot is a
+    /// blank page. Mark them non-shareable and take them off screen first.
+    static func concealOwnWindows() {
+        for window in NSApp.windows {
+            window.sharingType = .none
+            window.orderOut(nil)
+        }
+    }
+
     static func image(forAppKitRect rect: CGRect) async throws -> CGImage {
         guard CGPreflightScreenCaptureAccess() else {
             throw ScreenCaptureFailure(permissionDenied: true)
@@ -44,15 +53,10 @@ enum ScreenRegionCapture {
             width: local.width,
             height: local.height
         )
-        var best: CGImage?
-        var bestScore = -1.0
+        var candidates: [CGImage] = []
 
         func consider(_ image: CGImage) {
-            let score = TextRecognizer.brightPixelFraction(image)
-            if score > bestScore {
-                best = image
-                bestScore = score
-            }
+            candidates.append(image)
         }
         func note(_ error: Error) throws {
             if permissionDenied(error) {
@@ -78,9 +82,6 @@ enum ScreenRegionCapture {
                         if let cropped = crop(full, localPoints: candidate, screen: screen) {
                             consider(cropped)
                         }
-                        if bestScore >= 0.01 {
-                            return best!
-                        }
                     }
                 } catch {
                     try note(error)
@@ -89,9 +90,6 @@ enum ScreenRegionCapture {
             if let window = windowUnderSelection(rect, content: content) {
                 do {
                     consider(try await captureWindow(window, selection: rect, scale: screen.backingScaleFactor))
-                    if bestScore >= 0.01 {
-                        return best!
-                    }
                 } catch {
                     try note(error)
                 }
@@ -104,24 +102,16 @@ enum ScreenRegionCapture {
                     } catch {
                         try note(error)
                     }
-                    if bestScore >= 0.01 {
-                        return best!
-                    }
                 }
-                if bestScore < 0.01 {
-                    do {
-                        let full = try await captureFullDisplay(filter: filter, screen: screen)
-                        for candidate in [local, appKitLocal] {
-                            if let cropped = crop(full, localPoints: candidate, screen: screen) {
-                                consider(cropped)
-                            }
-                            if bestScore >= 0.01 {
-                                return best!
-                            }
+                do {
+                    let full = try await captureFullDisplay(filter: filter, screen: screen)
+                    for candidate in [local, appKitLocal] {
+                        if let cropped = crop(full, localPoints: candidate, screen: screen) {
+                            consider(cropped)
                         }
-                    } catch {
-                        try note(error)
                     }
+                } catch {
+                    try note(error)
                 }
             }
         }
@@ -131,25 +121,22 @@ enum ScreenRegionCapture {
         } catch {
             try note(error)
         }
-        if bestScore < 0.01 {
-            do {
-                consider(try await captureRect(rect))
-            } catch {
-                try note(error)
-            }
+        do {
+            consider(try await captureRect(rect))
+        } catch {
+            try note(error)
         }
 
-        // ScreenCaptureKit can still return a black or empty-desktop crop after
-        // permission is granted. The system screencapture tool usually returns
-        // the composited pixels OCR needs, so always consider it and keep the
-        // brightest candidate.
+        // ScreenCaptureKit can return a black frame or a flat white window
+        // after permission is granted. The system tool usually has the page.
+        // Keep the candidate with real contrast, not merely the brightest one.
         for candidate in [quartz, rect] {
             if let image = try? captureWithScreencapture(quartzRect: candidate) {
                 consider(image)
             }
         }
 
-        if let best {
+        if let best = CaptureCandidate.preferred(candidates) {
             return best
         }
         throw ScreenCaptureFailure(permissionDenied: false)
@@ -257,7 +244,7 @@ enum ScreenRegionCapture {
             height: selection.height
         )
         let choices = [fromTop, fromBottom].compactMap { crop($0, in: image, unitSize: size) } + [image]
-        return choices.max { TextRecognizer.brightPixelFraction($0) < TextRecognizer.brightPixelFraction($1) } ?? image
+        return CaptureCandidate.preferred(choices) ?? image
     }
 
     /// The whole display, as composited, with no source rectangle. A partial

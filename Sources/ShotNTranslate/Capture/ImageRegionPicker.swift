@@ -10,6 +10,7 @@ final class ImageRegionPicker {
     private var window: NSWindow?
     private var continuation: CheckedContinuation<CGRect?, Never>?
     private var keyMonitor: Any?
+    private var didFinish = false
     private let image: CGImage
 
     init(image: CGImage) {
@@ -109,7 +110,8 @@ final class ImageRegionPicker {
     }
 
     private func complete(_ rect: CGRect?) {
-        guard let continuation else { return }
+        guard !didFinish, let continuation else { return }
+        didFinish = true
         self.continuation = nil
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)

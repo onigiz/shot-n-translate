@@ -9,6 +9,7 @@ struct ShotNTranslateApp: App {
     @State private var updateCenter: UpdateCenter
     @State private var translator: ScreenshotTranslator
     @State private var router: ShortcutRouter
+    @State private var cardLibrary: CardLibraryController
 
     init() {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -17,9 +18,13 @@ struct ShotNTranslateApp: App {
         let language = LanguageStore.shared
         let settings = TranslationSettings.shared
         let translator = ScreenshotTranslator(settings: settings, languageStore: language)
+        let library = CardLibraryController(translator: translator, languageStore: language)
         let router = ShortcutRouter(translator: translator, updateCenter: center)
         router.openUpdateHistory = {
             UpdateHistoryWindow.show(languageStore: language, updateCenter: center)
+        }
+        router.openCardLibrary = {
+            CardLibraryWindow.show(library: library, languageStore: language)
         }
         GlobalShortcutCenter.shared.install(router: router)
         _languageStore = State(initialValue: language)
@@ -27,6 +32,7 @@ struct ShotNTranslateApp: App {
         _updateCenter = State(initialValue: center)
         _translator = State(initialValue: translator)
         _router = State(initialValue: router)
+        _cardLibrary = State(initialValue: library)
     }
 
     var body: some Scene {
@@ -37,6 +43,7 @@ struct ShotNTranslateApp: App {
                 .environment(updateCenter)
                 .environment(translator)
                 .environment(router)
+                .environment(cardLibrary)
         } label: {
             Image(systemName: "camera.viewfinder")
                 .accessibilityLabel(AppReleaseIdentity.applicationName)

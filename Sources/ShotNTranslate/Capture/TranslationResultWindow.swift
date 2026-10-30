@@ -29,7 +29,9 @@ enum TranslationResultWindow {
             window.setContentSize(NSSize(width: 640, height: 720))
             window.isReleasedWhenClosed = false
             window.tabbingMode = .disallowed
-            window.level = .normal
+            window.sharingType = .none
+            window.level = .floating
+            window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             closeDelegate.onClose = { [weak translator] in
                 translator?.releasePreview()
             }
@@ -37,6 +39,8 @@ enum TranslationResultWindow {
             window.center()
             self.window = window
         }
+        window?.alphaValue = 1
+        window?.orderFrontRegardless()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
     }
@@ -196,7 +200,15 @@ struct TranslationResultView: View {
             HStack(spacing: 12) {
                 if let notice = translator.saveNotice {
                     Text(L10n.string(notice, language: language))
-                        .foregroundStyle(notice == .pdfSaved ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
+                        .foregroundStyle(
+                            notice == .pdfSaved || notice == .cardSaved
+                                ? AnyShapeStyle(.secondary)
+                                : AnyShapeStyle(.red)
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let title = translator.openCardTitle {
+                    Text(title)
+                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Spacer()
@@ -204,8 +216,12 @@ struct TranslationResultView: View {
                 Button(L10n.string(.savePDF, language: language)) {
                     translator.savePDF()
                 }
-                .buttonStyle(.borderedProminent)
                 .disabled(!translator.canSaveFormattedPDF)
+                Button(L10n.string(.saveCard, language: language)) {
+                    translator.saveCard()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!translator.canSaveCard)
             }
         }
     }
