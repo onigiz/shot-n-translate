@@ -24,6 +24,7 @@ enum CardLibraryWindow {
             window.setContentSize(NSSize(width: 900, height: 620))
             window.isReleasedWhenClosed = false
             window.tabbingMode = .disallowed
+            window.sharingType = .none
             window.center()
             self.window = window
         } else {
@@ -31,5 +32,9 @@ enum CardLibraryWindow {
         }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
+    }
+
+    static func hide() {
+        window?.orderOut(nil)
     }
 }

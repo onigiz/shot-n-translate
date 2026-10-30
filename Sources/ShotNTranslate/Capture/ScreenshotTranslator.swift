@@ -86,9 +86,12 @@ final class ScreenshotTranslator {
         let selector = RegionSelector()
         guard let rect = await selector.select(instruction: instruction) else { return }
         TranslationResultWindow.hideWithoutReleasing()
+        CardLibraryWindow.hide()
+        ScreenRegionCapture.concealOwnWindows()
         let session = beginSession()
         // The selection shade is full-screen. Capturing before it leaves the
-        // compositor produces a black rectangle where the page was.
+        // compositor produces a black rectangle. Our own windows are white
+        // and would be photographed in its place.
         do {
             try await Task.sleep(nanoseconds: 550_000_000)
         } catch {

@@ -12,6 +12,7 @@ struct ShotNTranslateChecks {
             try checkImageRegion()
             try checkQuarterTurn()
             try checkImageRotation()
+            try checkCaptureCandidate()
             try checkPreviewMarkup()
             try checkCardLibrary()
             try checkSidewaysText()
@@ -493,6 +494,16 @@ private func checkPreviewImageTurn() throws {
         regionLuminance(clockwise, CGRect(x: 0, y: 0, width: 1, height: 0.5)) < 0.3,
         "Clockwise leaves the bottom dark"
     )
+}
+
+private func checkCaptureCandidate() throws {
+    let page = try renderedTextImage("PAGE", width: 240, height: 80, fontSize: 36)
+    let white = try solidImage(width: 240, height: 80, color: .white)
+    let black = try solidImage(width: 240, height: 80, color: .black)
+    try expect(CaptureCandidate.score(page) > CaptureCandidate.score(white), "A text page beats a flat white capture")
+    try expect(CaptureCandidate.score(page) > CaptureCandidate.score(black), "A text page beats a flat black capture")
+    let chosen = CaptureCandidate.preferred([white, black, page])
+    try expect(chosen?.width == page.width, "The page is kept when white and black captures are also available")
 }
 
 private func checkPreviewMarkup() throws {

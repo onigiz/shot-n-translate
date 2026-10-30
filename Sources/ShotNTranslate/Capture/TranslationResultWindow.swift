@@ -29,7 +29,9 @@ enum TranslationResultWindow {
             window.setContentSize(NSSize(width: 640, height: 720))
             window.isReleasedWhenClosed = false
             window.tabbingMode = .disallowed
-            window.level = .normal
+            window.sharingType = .none
+            window.level = .floating
+            window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             closeDelegate.onClose = { [weak translator] in
                 translator?.releasePreview()
             }
@@ -37,6 +39,8 @@ enum TranslationResultWindow {
             window.center()
             self.window = window
         }
+        window?.alphaValue = 1
+        window?.orderFrontRegardless()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate()
     }
