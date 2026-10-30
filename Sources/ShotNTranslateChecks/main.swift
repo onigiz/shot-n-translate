@@ -12,6 +12,7 @@ struct ShotNTranslateChecks {
             try checkImageRegion()
             try checkQuarterTurn()
             try checkImageRotation()
+            try checkPreviewMarkup()
             try checkSidewaysText()
             try checkTranslationText()
             try await checkPreferences()
@@ -442,6 +443,148 @@ private func checkImageRotation() throws {
     )
     try expect(abs(mapped.minX) < 0.08, "The moved half maps back to the left edge, got \(mapped)")
     try expect(mapped.midX < 0.5, "The moved half maps back onto the original white half, got \(mapped)")
+    try checkPreviewImageTurn()
+}
+
+private func checkPreviewImageTurn() throws {
+    try expect(PreviewImageTurn.normalized(360) == 0, "A full clockwise turn is level")
+    try expect(PreviewImageTurn.normalized(-5) == -5, "Five degrees left stays five degrees left")
+    try expect(PreviewImageTurn.normalized(355) == -5, "355 clockwise degrees is five degrees left")
+    try expect(PreviewImageTurn.normalized(90) == 90, "A quarter turn clockwise stays 90")
+    try expect(PreviewImageTurn.normalized(180) == 180, "A half turn stays 180")
+    try expect(PreviewImageTurn.normalized(-180) == 180, "Half turns share one angle")
+    try expect(PreviewImageTurn.normalized(185) == -175, "Past a half turn wraps the short way")
+    try expect(PreviewImageTurn.normalized(7) == 7, "A dragged angle is not forced onto a 5 degree step")
+    try expect(
+        PreviewImageTurn(clockwiseDegrees: 350).turned(by: 20).clockwiseDegrees == 10,
+        "Turning past level wraps through zero"
+    )
+    let center = CGPoint(x: 100, y: 100)
+    let above = PreviewRotationDrag.clockwiseDegrees(from: center, to: CGPoint(x: 100, y: 40))
+    let right = PreviewRotationDrag.clockwiseDegrees(from: center, to: CGPoint(x: 160, y: 100))
+    try expect(above.map { abs($0) < 0.01 } == true, "Straight up is zero degrees, got \(String(describing: above))")
+    try expect(right.map { abs($0 - 90) < 0.01 } == true, "To the right is 90 degrees clockwise, got \(String(describing: right))")
+    try expect(PreviewRotationDrag.clockwiseDegrees(from: center, to: center) == nil, "The center is not an angle")
+    try expect(
+        abs(PreviewRotationDrag.imageDegrees(startDegrees: 10, grabDegrees: 10, pointerDegrees: 40) - 40) < 0.01,
+        "Dragging the handle turns the image by the same amount"
+    )
+    let uprightHandle = PreviewRotationDrag.handleOffset(imageHeight: 100, gap: 20, clockwiseDegrees: 0)
+    try expect(abs(uprightHandle.x) < 0.01 && uprightHandle.y < -60, "The handle starts above the center, got \(uprightHandle)")
+    let sidewaysHandle = PreviewRotationDrag.handleOffset(imageHeight: 100, gap: 20, clockwiseDegrees: 90)
+    try expect(sidewaysHandle.x > 60 && abs(sidewaysHandle.y) < 0.01, "A quarter turn moves the handle to the right, got \(sidewaysHandle)")
+
+    let image = try halfToneImage(width: 40, height: 20)
+    let level = PreviewImageTurn(clockwiseDegrees: 0).image(from: image)
+    try expect(level.width == 40 && level.height == 20, "Zero rotation keeps the captured image")
+    try expect(
+        regionLuminance(level, CGRect(x: 0, y: 0, width: 0.5, height: 1)) > 0.7,
+        "Zero rotation keeps the white half on the left"
+    )
+
+    let clockwise = PreviewImageTurn(clockwiseDegrees: 90).image(from: image)
+    try expect(clockwise.width == 20 && clockwise.height == 40, "A quarter turn swaps the sides, got \(clockwise.width)x\(clockwise.height)")
+    try expect(
+        regionLuminance(clockwise, CGRect(x: 0, y: 0.5, width: 1, height: 0.5)) > 0.7,
+        "Clockwise moves the white half to the top"
+    )
+    try expect(
+        regionLuminance(clockwise, CGRect(x: 0, y: 0, width: 1, height: 0.5)) < 0.3,
+        "Clockwise leaves the bottom dark"
+    )
+}
+
+private func checkPreviewMarkup() throws {
+    let square = PreviewMarkupGeometry.shapeBounds(
+        from: CGPoint(x: 0.2, y: 0.3),
+        to: CGPoint(x: 0.5, y: 0.4)
+    )
+    try expect(abs(square.width - 0.3) < 0.001 && abs(square.height - 0.3) < 0.001, "A square uses the longer drag, got \(square)")
+    try expect(abs(square.minX - 0.2) < 0.001 && abs(square.minY - 0.3) < 0.001, "The square starts at the drag origin")
+
+    let crop = PreviewMarkupGeometry.crop(
+        CGRect(x: 0.1, y: 0.2, width: 0.5, height: 0.4),
+        toVisible: CGRect(x: 0.5, y: 0, width: 0.5, height: 1)
+    )
+    try expect(abs(crop.minX - 0.35) < 0.001 && abs(crop.minY - 0.2) < 0.001, "A second crop stays inside the first, got \(crop)")
+    try expect(abs(crop.width - 0.25) < 0.001 && abs(crop.height - 0.4) < 0.001, "The visible half keeps the crop height, got \(crop)")
+
+    let center = CGPoint(x: 400, y: 300)
+    let imageSize = CGSize(width: 200, height: 100)
+    let topLeft = PreviewMarkupGeometry.visiblePoint(
+        CGPoint(x: 300, y: 250),
+        center: center,
+        imageSize: imageSize,
+        clockwiseDegrees: 0
+    )
+    try expect(abs(topLeft.x) < 0.02 && abs(topLeft.y) < 0.02, "The level top-left stays the top-left, got \(topLeft)")
+    let turnedTopLeft = PreviewMarkupGeometry.visiblePoint(
+        CGPoint(x: 450, y: 200),
+        center: center,
+        imageSize: imageSize,
+        clockwiseDegrees: 90
+    )
+    try expect(abs(turnedTopLeft.x) < 0.02 && abs(turnedTopLeft.y) < 0.02, "A quarter turn maps the visual top-left back, got \(turnedTopLeft)")
+
+    let white = try solidImage(width: 80, height: 80, color: .white)
+    var markup = PreviewMarkup()
+    markup.marks = [
+        PreviewMark(
+            kind: .square,
+            bounds: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5),
+            red: 1,
+            green: 0,
+            blue: 0,
+            strokePixels: 8
+        )
+    ]
+    let drawn = PreviewMarkupImage.image(from: white, markup: markup)
+    try expect(drawn.width == 80 && drawn.height == 80, "Outlines keep the capture size")
+    let edge = pixelColor(drawn, x: 40, y: 20)
+    try expect(edge.red > 0.7 && edge.green < 0.3, "The square outline is red, got \(edge)")
+
+    markup.crop = CGRect(x: 0, y: 0, width: 0.5, height: 1)
+    markup.marks = []
+    let cropped = PreviewMarkupImage.image(from: try halfToneImage(width: 40, height: 20), markup: markup)
+    try expect(cropped.width < 30, "Cropping keeps the left half, got \(cropped.width)")
+    try expect(
+        regionLuminance(cropped, CGRect(x: 0, y: 0, width: 1, height: 1)) > 0.7,
+        "The left half of the test image is white"
+    )
+}
+
+private func solidImage(width: Int, height: Int, color: NSColor) throws -> CGImage {
+    guard let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: width,
+        pixelsHigh: height,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ) else {
+        throw CheckError(description: "Could not create a solid image")
+    }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    color.setFill()
+    NSRect(x: 0, y: 0, width: width, height: height).fill()
+    NSGraphicsContext.restoreGraphicsState()
+    guard let image = rep.cgImage else {
+        throw CheckError(description: "Could not read the solid image")
+    }
+    return image
+}
+
+private func pixelColor(_ image: CGImage, x: Int, y: Int) -> (red: CGFloat, green: CGFloat, blue: CGFloat) {
+    let rep = NSBitmapImageRep(cgImage: image)
+    guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+        return (0, 0, 0)
+    }
+    return (color.redComponent, color.greenComponent, color.blueComponent)
 }
 
 private func renderedAngledText(_ text: String, degrees: CGFloat) throws -> CGImage {

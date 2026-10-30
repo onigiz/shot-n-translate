@@ -2,7 +2,7 @@
 
 macOS app that takes a screenshot, detects any text in the image, translates that text, and saves both the original content and the translation in a PDF.
 
-The source language is detected automatically. Text that is sideways, upside down, or diagonal is turned upright for recognition, in steps of 5 degrees around the circle. The screenshot in the preview stays as it was captured. The preview can correct that source and translate again. The translation target is Turkish or English. The menu can translate the whole screenshot immediately, or ask for a region of that screenshot first. The screenshot stays whole either way. The app interface is Turkish by default and can switch to English immediately.
+The source language is detected automatically. Text that is sideways, upside down, or diagonal is turned upright for recognition, in steps of 5 degrees around the circle. The screenshot in the preview stays as it was captured. After translation, a handle on that image rotates it around its center. The image can also be cropped, and squares or circles can be drawn on it in a chosen color and outline thickness. The PDF uses that rotation, crop, and those outlines. The preview can correct that source and translate again. The translation target is Turkish or English. The menu can translate the whole screenshot immediately, or ask for a region of that screenshot first. The screenshot stays whole either way. The app interface is Turkish by default and can switch to English immediately.
 
 ## Status
 

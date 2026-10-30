@@ -83,6 +83,14 @@ public enum L10nKey: CaseIterable, Sendable {
     case smallerText
     case editorLight
     case editorDark
+    case rotateImageHandle
+    case cropImage
+    case drawSquare
+    case drawCircle
+    case shapeColor
+    case shapeThickness
+    case undoMark
+    case resetCrop
     case colorBlack
     case colorWhite
     case colorRed
@@ -242,6 +250,14 @@ public enum L10n {
         case .smallerText: "Yazıyı küçült"
         case .editorLight: "Açık zemin"
         case .editorDark: "Koyu zemin"
+        case .rotateImageHandle: "Tutamacı sürükleyerek görseli döndür. Merkez yerinde kalır."
+        case .cropImage: "Görseli kırp"
+        case .drawSquare: "Kare çiz"
+        case .drawCircle: "Çember çiz"
+        case .shapeColor: "Şekil rengi"
+        case .shapeThickness: "Çerçeve kalınlığı"
+        case .undoMark: "Son şekli sil"
+        case .resetCrop: "Kırpmayı geri al"
         case .colorBlack: "Siyah"
         case .colorWhite: "Beyaz"
         case .colorRed: "Kırmızı"
@@ -335,6 +351,14 @@ public enum L10n {
         case .smallerText: "Smaller text"
         case .editorLight: "Light background"
         case .editorDark: "Dark background"
+        case .rotateImageHandle: "Drag the handle to rotate the image. The center stays fixed."
+        case .cropImage: "Crop image"
+        case .drawSquare: "Draw a square"
+        case .drawCircle: "Draw a circle"
+        case .shapeColor: "Shape color"
+        case .shapeThickness: "Outline thickness"
+        case .undoMark: "Remove last shape"
+        case .resetCrop: "Reset crop"
         case .colorBlack: "Black"
         case .colorWhite: "White"
         case .colorRed: "Red"

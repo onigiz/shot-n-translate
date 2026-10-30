@@ -158,11 +158,25 @@ struct TranslationResultView: View {
     private func resultBody(_ result: CaptureTranslation, language: AppLanguage) -> some View {
         VStack(spacing: 12) {
             if let preview = translator.capturePreview {
-                Image(nsImage: preview)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: 240)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                RotatablePreview(
+                    image: preview,
+                    clockwiseDegrees: translator.previewTurn.clockwiseDegrees,
+                    tool: translator.previewTool,
+                    markColor: Color(
+                        red: translator.shapeRed,
+                        green: translator.shapeGreen,
+                        blue: translator.shapeBlue
+                    ),
+                    outlineWidth: outlineWidth(for: preview),
+                    help: L10n.string(.rotateImageHandle, language: language),
+                    onDegrees: { translator.setPreviewClockwiseDegrees($0) },
+                    onShape: { bounds in
+                        let kind: PreviewMarkKind = translator.previewTool == .circle ? .circle : .square
+                        translator.addPreviewMark(visibleBounds: bounds, kind: kind)
+                    },
+                    onCrop: { translator.cropPreview(toVisible: $0) }
+                )
+                previewMarkupToolbar(language: language)
             }
             chooseRegionButton(language: language)
             sourceMenu(result: result, language: language)
@@ -303,6 +317,101 @@ struct TranslationResultView: View {
         }
     }
 
+    private func outlineWidth(for preview: NSImage) -> CGFloat {
+        let shorter = min(preview.size.width, preview.size.height)
+        return CGFloat(PreviewMarkup.strokeWidth(
+            thickness: translator.shapeThickness,
+            shorterSide: Double(shorter)
+        ))
+    }
+
+    private func previewMarkupToolbar(language: AppLanguage) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                markupToolButton("crop", tool: .crop, help: .cropImage, language: language)
+                markupToolButton("square", tool: .square, help: .drawSquare, language: language)
+                markupToolButton("circle", tool: .circle, help: .drawCircle, language: language)
+                Divider().frame(height: 16)
+                Menu {
+                    ForEach(EditorColorChoices.all) { choice in
+                        Button(L10n.string(choice.key, language: language)) {
+                            let rgb = choice.color.usingColorSpace(.sRGB) ?? choice.color
+                            translator.setShapeColor(
+                                red: rgb.redComponent,
+                                green: rgb.greenComponent,
+                                blue: rgb.blueComponent
+                            )
+                        }
+                    }
+                } label: {
+                    Image(systemName: "paintpalette")
+                        .foregroundStyle(Color(
+                            red: translator.shapeRed,
+                            green: translator.shapeGreen,
+                            blue: translator.shapeBlue
+                        ))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help(L10n.string(.shapeColor, language: language))
+                Image(systemName: "lineweight")
+                    .foregroundStyle(.secondary)
+                    .help(L10n.string(.shapeThickness, language: language))
+                Slider(
+                    value: Binding(
+                        get: { translator.shapeThickness },
+                        set: { translator.setShapeThickness($0) }
+                    ),
+                    in: 1...12,
+                    step: 1
+                )
+                .frame(width: 90)
+                .help(L10n.string(.shapeThickness, language: language))
+                if !translator.previewMarkup.marks.isEmpty {
+                    Button {
+                        translator.undoPreviewMark()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(L10n.string(.undoMark, language: language))
+                }
+                if translator.previewMarkup.isCropped {
+                    Button {
+                        translator.resetPreviewCrop()
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(L10n.string(.resetCrop, language: language))
+                }
+            }
+        }
+    }
+
+    private func markupToolButton(
+        _ symbol: String,
+        tool: PreviewCanvasTool,
+        help: L10nKey,
+        language: AppLanguage
+    ) -> some View {
+        Button {
+            translator.selectPreviewTool(tool)
+        } label: {
+            Image(systemName: symbol)
+                .frame(width: 18, height: 18)
+                .padding(4)
+                .background(
+                    translator.previewTool == tool
+                        ? Color.accentColor.opacity(0.22)
+                        : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+        }
+        .buttonStyle(.borderless)
+        .help(L10n.string(help, language: language))
+    }
+
     private func chooseRegionButton(language: AppLanguage) -> some View {
         Button(L10n.string(.selectTranslationArea, language: language)) {
             Task { await translator.retranslateSelectedRegion() }
@@ -350,6 +459,232 @@ struct TranslationResultView: View {
         }
     }
 
+}
+
+private struct RotatablePreview: View {
+    var image: NSImage
+    var clockwiseDegrees: Double
+    var tool: PreviewCanvasTool
+    var markColor: Color
+    var outlineWidth: CGFloat
+    var help: String
+    var onDegrees: (Double) -> Void
+    var onShape: (CGRect) -> Void
+    var onCrop: (CGRect) -> Void
+
+    @State private var dragStartDegrees: Double?
+    @State private var dragGrabDegrees: Double?
+    @State private var dragStart: CGPoint?
+    @State private var dragCurrent: CGPoint?
+
+    private let pad: CGFloat = 28
+
+    var body: some View {
+        GeometryReader { geo in
+            let available = CGSize(
+                width: max(geo.size.width - pad * 2, 1),
+                height: max(geo.size.height - pad * 2, 1)
+            )
+            let fitted = fittedImageSize(in: available)
+            let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
+            let stemEnd = shifted(
+                center,
+                by: PreviewRotationDrag.handleOffset(
+                    imageHeight: fitted.height,
+                    gap: 18,
+                    clockwiseDegrees: clockwiseDegrees
+                )
+            )
+            let edge = shifted(
+                center,
+                by: PreviewRotationDrag.handleOffset(
+                    imageHeight: fitted.height,
+                    gap: 2,
+                    clockwiseDegrees: clockwiseDegrees
+                )
+            )
+            ZStack {
+                ZStack(alignment: .topLeading) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .frame(width: fitted.width, height: fitted.height)
+                    if let draft = draftBounds {
+                        draftOverlay(draft, size: fitted)
+                    }
+                }
+                .frame(width: fitted.width, height: fitted.height)
+                .rotationEffect(.degrees(clockwiseDegrees))
+                .position(center)
+                Path { path in
+                    path.move(to: edge)
+                    path.addLine(to: stemEnd)
+                }
+                .stroke(Color.secondary, lineWidth: 1.5)
+                Circle()
+                    .fill(Color.white)
+                    .overlay(Circle().strokeBorder(Color.secondary, lineWidth: 1))
+                    .shadow(color: .black.opacity(0.25), radius: 1, y: 1)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Circle().scale(1.6))
+                    .position(stemEnd)
+                    .highPriorityGesture(drag(center: center))
+                    .help(help)
+                    .accessibilityLabel(help)
+                if dragStartDegrees != nil {
+                    Text(degreeLabel)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .position(x: center.x, y: geo.size.height - 10)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .coordinateSpace(name: "rotatablePreview")
+            .gesture(drawGesture(center: center, imageSize: fitted))
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 280)
+    }
+
+    private var draftBounds: CGRect? {
+        guard tool != .rotate, let dragStart, let dragCurrent else { return nil }
+        let bounds = tool == .crop
+            ? PreviewMarkupGeometry.rect(from: dragStart, to: dragCurrent)
+            : PreviewMarkupGeometry.shapeBounds(from: dragStart, to: dragCurrent)
+        guard bounds.width >= 0.01, bounds.height >= 0.01 else { return nil }
+        return bounds
+    }
+
+    @ViewBuilder
+    private func draftOverlay(_ bounds: CGRect, size: CGSize) -> some View {
+        let rect = CGRect(
+            x: bounds.minX * size.width,
+            y: bounds.minY * size.height,
+            width: bounds.width * size.width,
+            height: bounds.height * size.height
+        )
+        if tool == .crop {
+            Path { path in
+                path.addRect(CGRect(origin: .zero, size: size))
+                path.addRect(rect)
+            }
+            .fill(Color.black.opacity(0.45), style: FillStyle(eoFill: true))
+            Rectangle()
+                .strokeBorder(Color.white, lineWidth: 1)
+                .frame(width: max(rect.width, 1), height: max(rect.height, 1))
+                .position(x: rect.midX, y: rect.midY)
+        } else if tool == .circle {
+            Ellipse()
+                .stroke(markColor, lineWidth: outlineWidth)
+                .frame(width: max(rect.width, 1), height: max(rect.height, 1))
+                .position(x: rect.midX, y: rect.midY)
+        } else {
+            Rectangle()
+                .stroke(markColor, lineWidth: outlineWidth)
+                .frame(width: max(rect.width, 1), height: max(rect.height, 1))
+                .position(x: rect.midX, y: rect.midY)
+        }
+    }
+
+    private func drawGesture(center: CGPoint, imageSize: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .named("rotatablePreview"))
+            .onChanged { value in
+                guard tool != .rotate else { return }
+                let start = PreviewMarkupGeometry.visiblePoint(
+                    value.startLocation,
+                    center: center,
+                    imageSize: imageSize,
+                    clockwiseDegrees: clockwiseDegrees
+                )
+                let current = PreviewMarkupGeometry.visiblePoint(
+                    value.location,
+                    center: center,
+                    imageSize: imageSize,
+                    clockwiseDegrees: clockwiseDegrees
+                )
+                dragStart = clamped(start)
+                dragCurrent = clamped(current)
+            }
+            .onEnded { value in
+                defer {
+                    dragStart = nil
+                    dragCurrent = nil
+                }
+                guard tool != .rotate else { return }
+                let start = clamped(PreviewMarkupGeometry.visiblePoint(
+                    value.startLocation,
+                    center: center,
+                    imageSize: imageSize,
+                    clockwiseDegrees: clockwiseDegrees
+                ))
+                let end = clamped(PreviewMarkupGeometry.visiblePoint(
+                    value.location,
+                    center: center,
+                    imageSize: imageSize,
+                    clockwiseDegrees: clockwiseDegrees
+                ))
+                let bounds = tool == .crop
+                    ? PreviewMarkupGeometry.rect(from: start, to: end)
+                    : PreviewMarkupGeometry.shapeBounds(from: start, to: end)
+                guard bounds.width >= 0.02, bounds.height >= 0.02 else { return }
+                if tool == .crop {
+                    onCrop(bounds)
+                } else {
+                    onShape(bounds)
+                }
+            }
+    }
+
+    private func clamped(_ point: CGPoint) -> CGPoint {
+        CGPoint(
+            x: min(max(point.x, 0), 1),
+            y: min(max(point.y, 0), 1)
+        )
+    }
+
+    private func drag(center: CGPoint) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("rotatablePreview"))
+            .onChanged { value in
+                guard let pointer = PreviewRotationDrag.clockwiseDegrees(from: center, to: value.location) else {
+                    return
+                }
+                if dragStartDegrees == nil || dragGrabDegrees == nil {
+                    dragStartDegrees = clockwiseDegrees
+                    dragGrabDegrees = pointer
+                }
+                guard let dragStartDegrees, let dragGrabDegrees else { return }
+                onDegrees(PreviewRotationDrag.imageDegrees(
+                    startDegrees: dragStartDegrees,
+                    grabDegrees: dragGrabDegrees,
+                    pointerDegrees: pointer
+                ))
+            }
+            .onEnded { _ in
+                dragStartDegrees = nil
+                dragGrabDegrees = nil
+            }
+    }
+
+    private func fittedImageSize(in available: CGSize) -> CGSize {
+        let source = image.size
+        guard source.width > 0, source.height > 0 else { return CGSize(width: 1, height: 1) }
+        let radians = clockwiseDegrees * .pi / 180
+        let cosine = abs(cos(radians))
+        let sine = abs(sin(radians))
+        let rotatedWidth = source.width * cosine + source.height * sine
+        let rotatedHeight = source.width * sine + source.height * cosine
+        let scale = min(available.width / rotatedWidth, available.height / rotatedHeight)
+        return CGSize(width: source.width * scale, height: source.height * scale)
+    }
+
+    private var degreeLabel: String {
+        let shown = Int(clockwiseDegrees.rounded())
+        if shown > 0 { return "+\(shown)°" }
+        return "\(shown)°"
+    }
+
+    private func shifted(_ point: CGPoint, by offset: CGPoint) -> CGPoint {
+        CGPoint(x: point.x + offset.x, y: point.y + offset.y)
+    }
 }
 
 private struct TranslationOutcome: Sendable {

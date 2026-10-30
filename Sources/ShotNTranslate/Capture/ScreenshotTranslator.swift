@@ -20,6 +20,15 @@ final class ScreenshotTranslator {
     private(set) var presentation: Presentation = .idle
     private(set) var translationConfiguration: TranslationSession.Configuration?
     private(set) var capturePreview: NSImage?
+    /// Clockwise turn of the preview and the PDF. The stored capture stays as shot.
+    private(set) var previewTurn = PreviewImageTurn(clockwiseDegrees: 0)
+    private(set) var previewMarkup = PreviewMarkup()
+    private(set) var previewTool: PreviewCanvasTool = .rotate
+    private(set) var shapeRed = 0.86
+    private(set) var shapeGreen = 0.15
+    private(set) var shapeBlue = 0.15
+    /// 1...12. The outline grows with this setting.
+    private(set) var shapeThickness = 4.0
     private(set) var saveNotice: L10nKey?
     private(set) var draft = NSAttributedString()
     private(set) var draftToken = UUID()
@@ -172,8 +181,10 @@ final class ScreenshotTranslator {
             Task { @MainActor in
                 guard response == .OK, let destination else { return }
                 do {
+                    let marked = PreviewMarkupImage.image(from: image, markup: self.previewMarkup)
+                    let turned = self.previewTurn.image(from: marked)
                     try TranslationPreviewPDF.write(
-                        image: image,
+                        image: turned,
                         document: document,
                         darkBackground: darkBackground,
                         to: destination
@@ -202,6 +213,9 @@ final class ScreenshotTranslator {
         isTranslating = false
         capturePreview = nil
         capturedImage = nil
+        previewTurn = PreviewImageTurn(clockwiseDegrees: 0)
+        previewMarkup = PreviewMarkup()
+        previewTool = .rotate
         saveNotice = nil
         draft = NSAttributedString()
         draftToken = UUID()
@@ -215,13 +229,83 @@ final class ScreenshotTranslator {
         session == id
     }
 
+    func setPreviewClockwiseDegrees(_ degrees: Double) {
+        let turn = PreviewImageTurn(clockwiseDegrees: degrees)
+        guard capturedImage != nil, turn != previewTurn else { return }
+        previewTurn = turn
+    }
+
+    func selectPreviewTool(_ tool: PreviewCanvasTool) {
+        previewTool = previewTool == tool ? .rotate : tool
+    }
+
+    func setShapeColor(red: Double, green: Double, blue: Double) {
+        shapeRed = red
+        shapeGreen = green
+        shapeBlue = blue
+    }
+
+    func setShapeThickness(_ thickness: Double) {
+        shapeThickness = min(max(thickness, 1), 12)
+    }
+
+    func addPreviewMark(visibleBounds: CGRect, kind: PreviewMarkKind) {
+        guard let image = capturedImage else { return }
+        guard visibleBounds.width >= 0.02, visibleBounds.height >= 0.02 else { return }
+        let original = PreviewMarkupGeometry.originalBounds(visibleBounds, crop: previewMarkup.crop)
+        let shorter = min(
+            previewMarkup.crop.width * Double(image.width),
+            previewMarkup.crop.height * Double(image.height)
+        )
+        previewMarkup.marks.append(PreviewMark(
+            kind: kind,
+            bounds: original,
+            red: shapeRed,
+            green: shapeGreen,
+            blue: shapeBlue,
+            strokePixels: PreviewMarkup.strokeWidth(thickness: shapeThickness, shorterSide: shorter)
+        ))
+        refreshPreview()
+    }
+
+    func cropPreview(toVisible visible: CGRect) {
+        guard capturedImage != nil else { return }
+        guard visible.width >= 0.04, visible.height >= 0.04 else { return }
+        let next = PreviewMarkupGeometry.crop(previewMarkup.crop, toVisible: visible)
+        guard next.width >= 0.02, next.height >= 0.02 else { return }
+        previewMarkup.crop = next
+        refreshPreview()
+    }
+
+    func resetPreviewCrop() {
+        guard previewMarkup.isCropped else { return }
+        previewMarkup.crop = PreviewMarkup.wholeImage
+        refreshPreview()
+    }
+
+    func undoPreviewMark() {
+        guard !previewMarkup.marks.isEmpty else { return }
+        previewMarkup.marks.removeLast()
+        refreshPreview()
+    }
+
+    private func refreshPreview() {
+        guard let image = capturedImage else { return }
+        capturePreview = fittedPreview(of: PreviewMarkupImage.image(from: image, markup: previewMarkup))
+    }
+
     private func showPreview(_ image: CGImage) {
         capturedImage = image
+        previewTurn = PreviewImageTurn(clockwiseDegrees: 0)
+        capturePreview = fittedPreview(of: image)
+    }
+
+    private func fittedPreview(of image: CGImage) -> NSImage {
         let pixelWidth = CGFloat(max(image.width, 1))
         let pixelHeight = CGFloat(max(image.height, 1))
         let longest = max(pixelWidth, pixelHeight)
         let fitted = min(1, 720 / longest)
-        capturePreview = NSImage(
+        return NSImage(
             cgImage: image,
             size: NSSize(width: pixelWidth * fitted, height: pixelHeight * fitted)
         )
